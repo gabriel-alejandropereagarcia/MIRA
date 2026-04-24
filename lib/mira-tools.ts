@@ -42,7 +42,9 @@ export const iniciarCuestionarioMchatTool = tool({
     idioma: z.enum(["es", "en"]).describe("Idioma de los ítems del cuestionario."),
   }),
   outputSchema: z.object({
-    respuestas: z.array(z.boolean()).length(20),
+    // Length is 20 on submit, 0 when the user cancels — keep it lenient
+    // so the output-schema validation never rejects a legitimate cancel.
+    respuestas: z.array(z.boolean()).max(20),
     edad_meses: z.number().int(),
     cancelado: z.boolean(),
   }),

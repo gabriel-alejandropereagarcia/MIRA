@@ -201,6 +201,12 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
                             edadMeses={edad}
                             idioma={idioma}
                             onSubmit={(output) => {
+                              console.log("[v0] mchat submit", {
+                                toolCallId: part.toolCallId,
+                                state: part.state,
+                                respuestasLen: output.respuestas.length,
+                                cancelado: output.cancelado,
+                              })
                               addToolOutput({
                                 tool: "iniciar_cuestionario_mchat",
                                 toolCallId: part.toolCallId,
@@ -221,6 +227,14 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
                               ? "Cuestionario cancelado."
                               : `Cuestionario completado (${out.respuestas.length} respuestas, ${out.edad_meses} meses).`}
                           </div>
+                        )
+                      }
+                      if (part.state === "output-error") {
+                        return (
+                          <ToolError
+                            key={i}
+                            text={part.errorText ?? "Error al registrar respuestas."}
+                          />
                         )
                       }
                       return null

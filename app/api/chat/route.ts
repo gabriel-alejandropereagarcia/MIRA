@@ -39,16 +39,34 @@ export async function POST(req: Request) {
     ? MIRA_DYNAMIC_INSTRUCTIONS
     : `${MIRA_DYNAMIC_INSTRUCTIONS}\n\n---\n\n${MIRA_STATIC_KNOWLEDGE_BASE}`
 
+  // Diagnostic: snapshot of each message's tool-part states before conversion.
+  const toolState = messages.flatMap((m) =>
+    (m.parts ?? [])
+      .filter((p) => typeof p.type === "string" && p.type.startsWith("tool-"))
+      .map((p) => {
+        const tp = p as { type: string; state?: string; toolCallId?: string }
+        return `${tp.type}:${tp.state ?? "?"}#${tp.toolCallId?.slice(0, 6) ?? "?"}`
+      }),
+  )
   console.log(
-    "[v0] /api/chat model=%s cache=%s",
+    "[v0] /api/chat model=%s cache=%s tools=[%s]",
     GOOGLE_MODEL,
     usingCache ? cacheName : "INLINE_FALLBACK",
+    toolState.join(", "),
   )
+
+  // `ignoreIncompleteToolCalls: true` drops any tool part still in
+  // `input-streaming` / `input-available` state, preventing a
+  // MissingToolResultsError when the model's tool-call stream finished
+  // without a client-side resolution yet (common with Gemini).
+  const modelMessages = await convertToModelMessages(messages, {
+    ignoreIncompleteToolCalls: true,
+  })
 
   const result = streamText({
     model: google(GOOGLE_MODEL),
     system: systemPrompt,
-    messages: await convertToModelMessages(messages),
+    messages: modelMessages,
     tools: miraTools,
     stopWhen: stepCountIs(8),
     // The Vercel AI SDK Google provider passes `cachedContent` straight
