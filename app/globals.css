@@ -1,0 +1,178 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* MIRA palette — calm, clinical, empathetic
+     Primary: soft healthcare blue
+     Accent: warm teal (for positive/supportive states)
+     Risk: amber (medium) and coral (high) — never aggressive red
+     Neutrals: off-white canvas, cool gray surfaces */
+  --background: oklch(0.985 0.005 230);
+  --foreground: oklch(0.24 0.03 240);
+
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.24 0.03 240);
+
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.24 0.03 240);
+
+  --primary: oklch(0.62 0.12 235);
+  --primary-foreground: oklch(0.99 0 0);
+
+  --secondary: oklch(0.95 0.015 225);
+  --secondary-foreground: oklch(0.3 0.04 240);
+
+  --muted: oklch(0.96 0.008 225);
+  --muted-foreground: oklch(0.52 0.025 240);
+
+  --accent: oklch(0.78 0.09 200);
+  --accent-foreground: oklch(0.22 0.04 235);
+
+  --destructive: oklch(0.62 0.18 25);
+  --destructive-foreground: oklch(0.99 0 0);
+
+  --border: oklch(0.91 0.01 225);
+  --input: oklch(0.93 0.01 225);
+  --ring: oklch(0.62 0.12 235);
+
+  /* Clinical risk tokens */
+  --risk-low: oklch(0.72 0.13 165);
+  --risk-medium: oklch(0.78 0.13 75);
+  --risk-high: oklch(0.62 0.18 25);
+
+  --chart-1: oklch(0.62 0.12 235);
+  --chart-2: oklch(0.72 0.13 165);
+  --chart-3: oklch(0.78 0.13 75);
+  --chart-4: oklch(0.62 0.18 25);
+  --chart-5: oklch(0.78 0.09 200);
+
+  --radius: 0.875rem;
+
+  --sidebar: oklch(0.98 0.01 230);
+  --sidebar-foreground: oklch(0.3 0.03 240);
+  --sidebar-primary: oklch(0.62 0.12 235);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.95 0.015 225);
+  --sidebar-accent-foreground: oklch(0.3 0.04 240);
+  --sidebar-border: oklch(0.91 0.01 225);
+  --sidebar-ring: oklch(0.62 0.12 235);
+}
+
+.dark {
+  --background: oklch(0.19 0.02 240);
+  --foreground: oklch(0.96 0.01 225);
+
+  --card: oklch(0.23 0.025 240);
+  --card-foreground: oklch(0.96 0.01 225);
+
+  --popover: oklch(0.23 0.025 240);
+  --popover-foreground: oklch(0.96 0.01 225);
+
+  --primary: oklch(0.72 0.13 230);
+  --primary-foreground: oklch(0.19 0.02 240);
+
+  --secondary: oklch(0.28 0.025 240);
+  --secondary-foreground: oklch(0.96 0.01 225);
+
+  --muted: oklch(0.28 0.025 240);
+  --muted-foreground: oklch(0.72 0.02 230);
+
+  --accent: oklch(0.55 0.1 200);
+  --accent-foreground: oklch(0.96 0.01 225);
+
+  --destructive: oklch(0.55 0.18 25);
+  --destructive-foreground: oklch(0.96 0.01 225);
+
+  --border: oklch(0.32 0.02 240);
+  --input: oklch(0.32 0.02 240);
+  --ring: oklch(0.72 0.13 230);
+
+  --risk-low: oklch(0.72 0.13 165);
+  --risk-medium: oklch(0.78 0.13 75);
+  --risk-high: oklch(0.68 0.18 25);
+
+  --sidebar: oklch(0.22 0.025 240);
+  --sidebar-foreground: oklch(0.96 0.01 225);
+  --sidebar-primary: oklch(0.72 0.13 230);
+  --sidebar-primary-foreground: oklch(0.19 0.02 240);
+  --sidebar-accent: oklch(0.28 0.025 240);
+  --sidebar-accent-foreground: oklch(0.96 0.01 225);
+  --sidebar-border: oklch(0.32 0.02 240);
+  --sidebar-ring: oklch(0.72 0.13 230);
+}
+
+@theme inline {
+  --font-sans: var(--font-inter), 'Inter Fallback', system-ui, sans-serif;
+  --font-serif: var(--font-fraunces), 'Fraunces Fallback', ui-serif, serif;
+  --font-mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-risk-low: var(--risk-low);
+  --color-risk-medium: var(--risk-medium);
+  --color-risk-high: var(--risk-high);
+
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+
+  --radius-sm: calc(var(--radius) - 6px);
+  --radius-md: calc(var(--radius) - 4px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 6px);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  }
+  h1, h2, h3, h4 {
+    @apply text-balance;
+  }
+  p {
+    @apply text-pretty;
+  }
+}
+
+/* Subtle scrollbar for the chat column */
+.mira-scroll::-webkit-scrollbar { width: 6px; }
+.mira-scroll::-webkit-scrollbar-track { background: transparent; }
+.mira-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted-foreground) 25%, transparent);
+  border-radius: 999px;
+}
