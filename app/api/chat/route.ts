@@ -34,5 +34,22 @@ export async function POST(req: Request) {
     stopWhen: stepCountIs(8),
   })
 
-  return result.toUIMessageStreamResponse()
+  return result.toUIMessageStreamResponse({
+    onError: (error) => {
+      console.log("[v0] /api/chat stream error:", error)
+      if (error == null) return "Error desconocido."
+      if (typeof error === "string") return error
+      if (error instanceof Error) {
+        // Surface Gateway billing issue to the client so the UI can react.
+        if (
+          error.message.includes("AI Gateway requires a valid credit card") ||
+          error.message.includes("customer_verification_required")
+        ) {
+          return "GATEWAY_BILLING_REQUIRED"
+        }
+        return error.message
+      }
+      return JSON.stringify(error)
+    },
+  })
 }

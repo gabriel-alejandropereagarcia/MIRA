@@ -7,7 +7,7 @@ import {
   lastAssistantMessageIsCompleteWithToolCalls,
 } from "ai"
 import { AnimatePresence, motion } from "framer-motion"
-import { ArrowUp, Heart, PanelLeft, Sparkles } from "lucide-react"
+import { AlertTriangle, ArrowUp, CreditCard, ExternalLink, Heart, PanelLeft, RotateCw, Sparkles } from "lucide-react"
 import type { MiraUIMessage } from "@/app/api/chat/route"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -41,9 +41,15 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
     addToolOutput,
     status,
     stop,
+    error,
+    regenerate,
+    clearError,
   } = useChat<MiraUIMessage>({
     transport: new DefaultChatTransport({ api: "/api/chat" }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
+    onError: (err) => {
+      console.log("[v0] useChat error:", err?.message)
+    },
   })
 
   // Derive triage state from the message history
@@ -354,6 +360,18 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
         </div>
       </div>
 
+      {/* Error banner */}
+      {error && (
+        <ErrorBanner
+          error={error}
+          onRetry={() => {
+            clearError()
+            regenerate()
+          }}
+          onDismiss={clearError}
+        />
+      )}
+
       {/* Composer */}
       <div className="border-t border-border/60 bg-background/90 px-4 py-4 backdrop-blur md:px-8">
         <div className="mx-auto w-full max-w-3xl">
@@ -503,5 +521,113 @@ function ToolError({ text }: { text: string }) {
     <div className="rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive-foreground">
       {text}
     </div>
+  )
+}
+
+function ErrorBanner({
+  error,
+  onRetry,
+  onDismiss,
+}: {
+  error: Error
+  onRetry: () => void
+  onDismiss: () => void
+}) {
+  const raw = error.message ?? ""
+  const isBilling =
+    raw.includes("GATEWAY_BILLING_REQUIRED") ||
+    raw.includes("AI Gateway requires a valid credit card") ||
+    raw.includes("customer_verification_required")
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="border-t border-amber-500/30 bg-amber-50 px-4 py-3 md:px-8 dark:bg-amber-950/30"
+      role="alert"
+    >
+      <div className="mx-auto flex w-full max-w-3xl items-start gap-3">
+        <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-500/15 text-amber-700 dark:text-amber-300">
+          {isBilling ? (
+            <CreditCard className="size-4" />
+          ) : (
+            <AlertTriangle className="size-4" />
+          )}
+        </span>
+
+        <div className="flex-1 text-sm">
+          {isBilling ? (
+            <>
+              <p className="font-semibold text-amber-900 dark:text-amber-100">
+                Vercel AI Gateway requiere una tarjeta en el archivo
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+                MIRA usa el AI Gateway de Vercel para responder. Tu equipo aún
+                no tiene un método de pago registrado, por lo que el modelo no
+                puede ejecutarse. Agregar una tarjeta{" "}
+                <strong>desbloquea los créditos gratuitos</strong> — no
+                realizamos cargos automáticos.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <a
+                  href="https://vercel.com/d?to=%2F%5Bteam%5D%2F~%2Fai%3Fmodal%3Dadd-credit-card"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-amber-700"
+                >
+                  Agregar tarjeta
+                  <ExternalLink className="size-3" />
+                </a>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 gap-1.5 text-amber-900 hover:bg-amber-500/10 dark:text-amber-200"
+                  onClick={onRetry}
+                >
+                  <RotateCw className="size-3" />
+                  Reintentar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-amber-900/70 hover:bg-amber-500/10 dark:text-amber-200/70"
+                  onClick={onDismiss}
+                >
+                  Cerrar
+                </Button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="font-semibold text-amber-900 dark:text-amber-100">
+                No se pudo completar la respuesta
+              </p>
+              <p className="mt-1 line-clamp-3 text-[13px] leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+                {raw || "Error desconocido al consultar al modelo."}
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-1.5 border-amber-500/40 bg-transparent text-amber-900 hover:bg-amber-500/10 dark:text-amber-200"
+                  onClick={onRetry}
+                >
+                  <RotateCw className="size-3" />
+                  Reintentar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-amber-900/70 hover:bg-amber-500/10 dark:text-amber-200/70"
+                  onClick={onDismiss}
+                >
+                  Cerrar
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </motion.div>
   )
 }
