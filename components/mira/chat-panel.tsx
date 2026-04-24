@@ -19,10 +19,12 @@ import { VideoAnalysisCard } from "@/components/generative/video-analysis-card"
 import { MchatQuestionnaire } from "@/components/generative/mchat-questionnaire"
 import type { TriageState } from "@/components/mira/triage-sidebar"
 import { MessageText } from "@/components/mira/message-text"
+import type { ChildProfile } from "@/lib/mira-storage"
 
 type Props = {
   onStateChange: (state: TriageState) => void
   onToggleSidebar: () => void
+  childProfile?: ChildProfile
 }
 
 const SUGGESTIONS = [
@@ -31,9 +33,36 @@ const SUGGESTIONS = [
   "¿Qué ejercicios Denver ayudan con la atención conjunta?",
 ]
 
-export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
+export function ChatPanel({
+  onStateChange,
+  onToggleSidebar,
+  childProfile,
+}: Props) {
   const [input, setInput] = useState("")
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  // Keep the live profile inside a ref so the transport closure, which is
+  // memoized once by useChat, always reads the most recent version without
+  // forcing a re-subscription on every prop change.
+  const profileRef = useRef<ChildProfile | undefined>(childProfile)
+  profileRef.current = childProfile
+
+  const transport = useMemo(
+    () =>
+      new DefaultChatTransport<MiraUIMessage>({
+        api: "/api/chat",
+        prepareSendMessagesRequest: ({ messages, id, trigger, messageId }) => ({
+          body: {
+            messages,
+            id,
+            trigger,
+            messageId,
+            childProfile: profileRef.current ?? null,
+          },
+        }),
+      }),
+    [],
+  )
 
   const {
     messages,
@@ -45,7 +74,7 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
     regenerate,
     clearError,
   } = useChat<MiraUIMessage>({
-    transport: new DefaultChatTransport({ api: "/api/chat" }),
+    transport,
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     onError: (err) => {
       console.log("[v0] useChat error:", err?.message)
@@ -141,6 +170,10 @@ export function ChatPanel({ onStateChange, onToggleSidebar }: Props) {
       {/* Messages */}
       <div
         ref={scrollRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions text"
+        aria-label="Conversación con MIRA"
         className="mira-scroll flex-1 overflow-y-auto px-4 py-6 md:px-8"
       >
         <div className="mx-auto w-full max-w-3xl space-y-5">

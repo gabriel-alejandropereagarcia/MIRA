@@ -16,6 +16,7 @@ import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
+import type { ChildProfile } from "@/lib/mira-storage"
 
 export type TriageStep =
   | "intake"
@@ -105,7 +106,13 @@ const riskToneBadge = (r: TriageState["risk"]) => {
   }
 }
 
-export function TriageSidebar({ state }: { state: TriageState }) {
+export function TriageSidebar({
+  state,
+  childProfile,
+}: {
+  state: TriageState
+  childProfile?: ChildProfile
+}) {
   const pct = computeProgress(state)
 
   return (
@@ -122,6 +129,38 @@ export function TriageSidebar({ state }: { state: TriageState }) {
           </p>
         </div>
       </div>
+
+      {/* Child context card (only after intake is complete) */}
+      {childProfile && (
+        <section
+          aria-label="Perfil del niño"
+          className="rounded-xl border border-primary/20 bg-primary/5 p-3"
+        >
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-9 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Baby className="size-4" aria-hidden="true" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold leading-tight text-foreground">
+                {childProfile.alias}
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {childProfile.ageMonths}{" "}
+                {childProfile.ageMonths === 1 ? "mes" : "meses"}
+                {childProfile.sex === "M" && " · niño"}
+                {childProfile.sex === "F" && " · niña"}
+              </p>
+            </div>
+          </div>
+          {childProfile.concerns.length > 0 && (
+            <p className="mt-2 text-[11px] leading-snug text-muted-foreground">
+              {childProfile.concerns.length} preocupación
+              {childProfile.concerns.length === 1 ? "" : "es"} registrada
+              {childProfile.concerns.length === 1 ? "" : "s"}
+            </p>
+          )}
+        </section>
+      )}
 
       {/* Triage progress */}
       <section aria-label="Progreso del triaje" className="space-y-3">

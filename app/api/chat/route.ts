@@ -21,6 +21,33 @@ export type MiraUIMessage = UIMessage<
   InferUITools<typeof miraTools>
 >
 
+type IncomingChildProfile = {
+  alias?: string
+  ageMonths?: number
+  sex?: "M" | "F" | "otro"
+  guardian?: string
+  concerns?: string[]
+} | null
+
+function renderChildContext(profile: IncomingChildProfile): string {
+  if (!profile || typeof profile !== "object") return ""
+  const sexLabel =
+    profile.sex === "M" ? "niño" : profile.sex === "F" ? "niña" : "sin especificar"
+  const concerns =
+    profile.concerns && profile.concerns.length > 0
+      ? profile.concerns.join(", ")
+      : "ninguna declarada al inicio"
+  return [
+    "### CONTEXTO DEL NIÑO (provisto por el cuidador en el intake)",
+    `- Alias: ${profile.alias ?? "sin alias"}`,
+    `- Edad: ${profile.ageMonths ?? "?"} meses (${sexLabel})`,
+    `- Completa el intake: ${profile.guardian ?? "sin especificar"}`,
+    `- Preocupaciones reportadas: ${concerns}`,
+    "",
+    "Usa este contexto en cada respuesta: dirígete al cuidador con calidez, usa el alias del niño/a, y ajusta las recomendaciones a la edad en meses. No solicites datos que ya aparezcan aquí.",
+  ].join("\n")
+}
+
 export async function POST(req: Request) {
   const body = await req.json()
 
@@ -29,15 +56,21 @@ export async function POST(req: Request) {
     tools: miraTools,
   })
 
+  const childContext = renderChildContext(body.childProfile as IncomingChildProfile)
+
   // Try to reuse (or lazily create) the Gemini context cache.
   // If the cache isn't available (missing key, below token threshold,
   // transient error), we fall back to sending the static block inline.
   const cacheName = await getMiraKnowledgeCache()
   const usingCache = Boolean(cacheName)
 
-  const systemPrompt = usingCache
+  const baseSystem = usingCache
     ? MIRA_DYNAMIC_INSTRUCTIONS
     : `${MIRA_DYNAMIC_INSTRUCTIONS}\n\n---\n\n${MIRA_STATIC_KNOWLEDGE_BASE}`
+
+  const systemPrompt = childContext
+    ? `${baseSystem}\n\n---\n\n${childContext}`
+    : baseSystem
 
   // Diagnostic: snapshot of each message's tool-part states before conversion.
   const toolState = messages.flatMap((m) =>

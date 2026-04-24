@@ -170,6 +170,11 @@ export function RiskMeter({
           MIRA es una herramienta de <strong>cribado</strong>, no de diagnóstico.
           Cualquier confirmación corresponde a un profesional calificado.
         </p>
+
+        <p className="border-t border-border/40 pt-3 text-[10px] leading-relaxed text-muted-foreground">
+          M-CHAT-R/F™ © 2009 Diana L. Robins, Deborah Fein, &amp; Marianne Barton.
+          Ref: mchatscreen.com
+        </p>
       </CardContent>
     </Card>
   )

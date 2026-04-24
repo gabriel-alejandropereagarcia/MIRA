@@ -16,10 +16,24 @@ const fraunces = Fraunces({
 })
 
 export const metadata: Metadata = {
-  title: "MIRA — Monitoreo e Intervención de Riesgo de Autismo",
+  title: "MIRA — Detección Temprana del Desarrollo Infantil",
   description:
-    "Agente clínico empático para el cribado temprano del desarrollo infantil. Basado en protocolos M-CHAT-R/F y el Modelo Denver (ESDM).",
+    "Herramienta gratuita de cribado basada en M-CHAT-R/F y Modelo Denver. Ayuda a identificar señales tempranas de autismo.",
   generator: "v0.app",
+  openGraph: {
+    title: "MIRA — Detección Temprana del Desarrollo Infantil",
+    description:
+      "Herramienta gratuita de cribado basada en M-CHAT-R/F y Modelo Denver. Ayuda a identificar señales tempranas de autismo.",
+    type: "website",
+    locale: "es_ES",
+    siteName: "MIRA",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MIRA — Detección Temprana del Desarrollo Infantil",
+    description:
+      "Herramienta gratuita de cribado basada en M-CHAT-R/F y Modelo Denver. Ayuda a identificar señales tempranas de autismo.",
+  },
 }
 
 export const viewport: Viewport = {

@@ -236,6 +236,12 @@ export function MchatQuestionnaire({
             </Button>
           )}
         </div>
+
+        <p className="border-t border-border/40 pt-3 text-center text-[10px] leading-relaxed text-muted-foreground">
+          M-CHAT-R/F™ © 2009 Diana L. Robins, Deborah Fein, &amp; Marianne Barton.
+          <br />
+          Ref: mchatscreen.com
+        </p>
       </CardContent>
     </Card>
   )
