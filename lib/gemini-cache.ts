@@ -39,7 +39,7 @@ type CacheEntry = {
 }
 
 let cached: CacheEntry | null = null
-let inflight: Promise<CacheEntry | null> | null = null
+let inflight: Promise<string | null> | null = null
 
 /**
  * Returns the cache resource name if creation succeeds, or null if we
@@ -54,7 +54,7 @@ export async function getMiraKnowledgeCache(): Promise<string | null> {
   // Creation in progress — join the same promise.
   if (inflight) return inflight
 
-  inflight = createCache()
+  const promise: Promise<string | null> = createCache()
     .then((entry) => {
       cached = entry
       return entry?.name ?? null
@@ -68,7 +68,8 @@ export async function getMiraKnowledgeCache(): Promise<string | null> {
       inflight = null
     })
 
-  return inflight
+  inflight = promise
+  return promise
 }
 
 async function createCache(): Promise<CacheEntry | null> {
