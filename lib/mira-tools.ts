@@ -30,8 +30,8 @@ export function scoreMchat(respuestas: boolean[]): {
  * devuelve las respuestas con addToolOutput.
  * ----------------------------------------------------------- */
 export const iniciarCuestionarioMchatTool = tool({
-  description:
-    "Abre el formulario interactivo M-CHAT-R/F de 20 ítems para que el cuidador responda visualmente. Úsala cuando el usuario describe preocupaciones conductuales en un niño de 16 a 30 meses SIN señales de regresión.",
+  // Rich semantic guidance lives in the cached MIRA knowledge base.
+  description: "Abre el formulario M-CHAT-R/F. Ver semántica en base cacheada.",
   inputSchema: z.object({
     edad_meses: z
       .number()
@@ -52,8 +52,7 @@ export const iniciarCuestionarioMchatTool = tool({
  * Tool 2 — evaluar_riesgo_mchat (server-side execute)
  * ----------------------------------------------------------- */
 export const evaluarRiesgoMchatTool = tool({
-  description:
-    "Procesa las 20 respuestas del M-CHAT-R/F para automatizar la puntuación y clasificar el riesgo (bajo/medio/alto).",
+  description: "Puntúa las 20 respuestas del M-CHAT-R/F. Ver reglas en base cacheada.",
   inputSchema: z.object({
     respuestas: z
       .array(z.boolean())
@@ -158,8 +157,7 @@ const DENVER_LIBRARY = {
 } as const
 
 export const sugerirEjerciciosDenverTool = tool({
-  description:
-    "Genera 2-3 misiones de juego del Modelo Denver (ESDM) adaptadas al área de desarrollo y nivel de riesgo.",
+  description: "Genera ejercicios ESDM (Denver). Ver áreas y contextos en base cacheada.",
   inputSchema: z.object({
     edad_meses: z.number().int().min(12).max(48),
     nivel_riesgo: z.enum(["medio", "alto"]),
@@ -192,8 +190,7 @@ export const sugerirEjerciciosDenverTool = tool({
  * Tool 4 — solicitar_video (client-side render)
  * ----------------------------------------------------------- */
 export const solicitarVideoTool = tool({
-  description:
-    "Abre el componente de carga de video para que el cuidador suba una grabación corta del comportamiento del niño. Úsala cuando ver el comportamiento aportaría información diagnóstica.",
+  description: "Abre el cargador de video. Ver criterios en base cacheada.",
   inputSchema: z.object({
     motivo: z
       .string()
@@ -221,8 +218,7 @@ export const solicitarVideoTool = tool({
  * Tool 5 — analizar_video_conducta (server-side execute, simulado)
  * ----------------------------------------------------------- */
 export const analizarVideoConductaTool = tool({
-  description:
-    "Analiza un video subido para detectar marcadores conductuales clínicos. Simulado en esta demo — en producción llamaría a un backend de visión.",
+  description: "Analiza marcadores conductuales en un video. Ver base cacheada.",
   inputSchema: z.object({
     video_uri: z.string(),
     marcadores: z.array(

@@ -538,6 +538,10 @@ function ErrorBanner({
     raw.includes("GATEWAY_BILLING_REQUIRED") ||
     raw.includes("AI Gateway requires a valid credit card") ||
     raw.includes("customer_verification_required")
+  const isGoogleKeyMissing =
+    raw.includes("GOOGLE_API_KEY_REQUIRED") ||
+    raw.includes("GOOGLE_GENERATIVE_AI_API_KEY") ||
+    raw.includes("API key not valid")
 
   return (
     <motion.div
@@ -556,7 +560,47 @@ function ErrorBanner({
         </span>
 
         <div className="flex-1 text-sm">
-          {isBilling ? (
+          {isGoogleKeyMissing ? (
+            <>
+              <p className="font-semibold text-amber-900 dark:text-amber-100">
+                Falta GOOGLE_GENERATIVE_AI_API_KEY
+              </p>
+              <p className="mt-1 text-[13px] leading-relaxed text-amber-900/80 dark:text-amber-200/80">
+                MIRA ahora usa Google Gemini con context caching. Agrega la
+                variable <code className="rounded bg-amber-500/15 px-1 py-0.5 text-[11px]">GOOGLE_GENERATIVE_AI_API_KEY</code> en la configuración del
+                proyecto. Obtén una clave gratuita en
+                <a
+                  href="https://aistudio.google.com/apikey"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="ml-1 inline-flex items-center gap-1 font-medium text-amber-900 underline underline-offset-2 hover:text-amber-700 dark:text-amber-200"
+                >
+                  AI Studio
+                  <ExternalLink className="size-3" />
+                </a>
+                .
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 gap-1.5 text-amber-900 hover:bg-amber-500/10 dark:text-amber-200"
+                  onClick={onRetry}
+                >
+                  <RotateCw className="size-3" />
+                  Reintentar
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-amber-900/70 hover:bg-amber-500/10 dark:text-amber-200/70"
+                  onClick={onDismiss}
+                >
+                  Cerrar
+                </Button>
+              </div>
+            </>
+          ) : isBilling ? (
             <>
               <p className="font-semibold text-amber-900 dark:text-amber-100">
                 Vercel AI Gateway requiere una tarjeta en el archivo
