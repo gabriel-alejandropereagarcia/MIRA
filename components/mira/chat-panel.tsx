@@ -17,6 +17,7 @@ import { DenverCards } from "@/components/generative/denver-cards"
 import { VideoUploader } from "@/components/generative/video-uploader"
 import { VideoAnalysisCard } from "@/components/generative/video-analysis-card"
 import { MchatQuestionnaire } from "@/components/generative/mchat-questionnaire"
+import { MchatFollowUp } from "@/components/generative/mchat-followup"
 import type { TriageState } from "@/components/mira/triage-sidebar"
 import { MessageText } from "@/components/mira/message-text"
 import { ThemeToggle } from "@/components/mira/theme-toggle"
@@ -238,12 +239,6 @@ export function ChatPanel({
                             edadMeses={edad}
                             idioma={idioma}
                             onSubmit={(output) => {
-                              console.log("[v0] mchat submit", {
-                                toolCallId: part.toolCallId,
-                                state: part.state,
-                                respuestasLen: output.respuestas.length,
-                                cancelado: output.cancelado,
-                              })
                               addToolOutput({
                                 tool: "iniciar_cuestionario_mchat",
                                 toolCallId: part.toolCallId,
@@ -297,6 +292,83 @@ export function ChatPanel({
                       }
                       if (part.state === "output-error") {
                         return <ToolError key={i} text={part.errorText ?? "Error de evaluación"} />
+                      }
+                      return null
+                    }
+
+                    // --- TOOL: iniciar_followup_mchat (client-side UI) ---
+                    if (part.type === "tool-iniciar_followup_mchat") {
+                      if (part.state === "input-streaming" || part.state === "input-available") {
+                        const inp = part.input as
+                          | {
+                              items_fallados?: number[]
+                              edad_meses?: number
+                              idioma?: "es" | "en"
+                            }
+                          | undefined
+                        return (
+                          <MchatFollowUp
+                            key={i}
+                            itemsFallados={inp?.items_fallados ?? []}
+                            edadMeses={inp?.edad_meses ?? 24}
+                            idioma={inp?.idioma ?? "es"}
+                            onSubmit={(output) => {
+                              addToolOutput({
+                                tool: "iniciar_followup_mchat",
+                                toolCallId: part.toolCallId,
+                                output,
+                              })
+                            }}
+                          />
+                        )
+                      }
+                      if (part.state === "output-available") {
+                        const out = part.output
+                        return (
+                          <div
+                            key={i}
+                            className="rounded-xl border border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+                          >
+                            {out.cancelado
+                              ? "Follow-Up cancelado."
+                              : `Follow-Up completado (${out.resultados_followup.length} ítems revisados, ${out.edad_meses} meses).`}
+                          </div>
+                        )
+                      }
+                      if (part.state === "output-error") {
+                        return (
+                          <ToolError
+                            key={i}
+                            text={part.errorText ?? "Error al registrar Follow-Up."}
+                          />
+                        )
+                      }
+                      return null
+                    }
+
+                    // --- TOOL: evaluar_followup_mchat (server) ---
+                    if (part.type === "tool-evaluar_followup_mchat") {
+                      if (part.state === "input-available") {
+                        return <ToolPending key={i} label="Calculando resultado Follow-Up…" />
+                      }
+                      if (part.state === "output-available") {
+                        const o = part.output
+                        return (
+                          <RiskMeter
+                            key={i}
+                            variant="followup"
+                            scoreStage1={o.score_stage1}
+                            followupScore={o.followup_score}
+                            totalItemsEvaluados={o.total_items_evaluados}
+                            resultadoFollowup={o.resultado}
+                            itemsQueFallanFollowup={o.items_que_fallan_followup}
+                            edadMeses={o.edad_meses}
+                            recomendacion={o.recomendacion}
+                          />
+                        )
+                      }
+                      if (part.state === "output-error") {
+                        return <ToolError key={i} text={part.errorText ?? "Error de evaluación Follow-Up"} />
                       }
                       return null
                     }

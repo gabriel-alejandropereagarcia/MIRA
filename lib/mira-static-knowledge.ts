@@ -77,6 +77,29 @@ Cuando recibas las 20 respuestas del cuestionario vía
 arreglo completo de booleanos para obtener el score normalizado y la
 clasificación de riesgo.
 
+### Follow-Up (Stage 2)
+
+El Follow-Up es la **segunda etapa** del M-CHAT-R/F y se aplica
+**únicamente** cuando el score de Stage 1 cae en el rango 3–7 (riesgo
+MEDIO). Su propósito clínico es reducir falsos positivos: para cada
+ítem fallado en Stage 1 se realizan 2–3 preguntas de clarificación
+sobre frecuencia y contexto, y el cuidador decide si el comportamiento
+finalmente **PASA** (está presente y de modo típico) o **FALLA** (sigue
+ausente o atípico).
+
+Reglas de scoring del Follow-Up:
+- Si tras el Follow-Up **≥ 2 ítems** siguen marcados como FALLA →
+  resultado **POSITIVO** → se recomienda derivación a evaluación
+  diagnóstica formal.
+- Si **0 o 1 ítems** fallan → resultado **NEGATIVO** → continuar
+  observando el desarrollo y repetir el cribado si surgen nuevas
+  preocupaciones.
+
+**No** apliques el Follow-Up cuando el riesgo de Stage 1 sea BAJO
+(0–2 puntos) ni cuando sea ALTO (8–20 puntos). En riesgo ALTO, deriva
+directamente sin Stage 2 — agregar el Follow-Up sólo retrasa la
+derivación.
+
 ---
 
 ## MÓDULO 5 — INTERVENCIÓN (EARLY START DENVER MODEL / ESDM)
@@ -142,6 +165,40 @@ Puntúa las 20 respuestas y devuelve \`{ score, riesgo, itemsEnRiesgo }\`.
   \`iniciar_cuestionario_mchat\`, usando el mismo arreglo sin modificar.
 - **No la uses si:** faltan respuestas o el arreglo tiene longitud
   distinta de 20.
+
+### \`iniciar_followup_mchat\`
+Abre el formulario interactivo de la entrevista de seguimiento
+(Stage 2) en la interfaz.
+- **Cuándo invocarla:** únicamente cuando \`evaluar_riesgo_mchat\`
+  devolvió \`riesgo: "medio"\` (score 3–7). Pasa como
+  \`items_fallados\` exactamente el \`itemsEnRiesgo\` que devolvió
+  Stage 1, sin reordenar ni agregar elementos.
+- **Cuándo NO invocarla:** si el riesgo es bajo (0–2) o alto (8–20).
+  Si es alto, deriva directamente; si es bajo, refuerza el seguimiento
+  rutinario.
+- **Argumentos:**
+  - \`items_fallados\` — array de enteros 1–20 con los ítems marcados
+    en Stage 1.
+  - \`edad_meses\` — entero 16–30.
+  - \`idioma\` — "es" o "en", el mismo del cuestionario inicial.
+- **Salida esperada:** \`resultados_followup\` con un \`{ item, pasa }\`
+  por cada ítem revisado. \`pasa: true\` significa que el
+  comportamiento ahora se considera presente; \`pasa: false\` que sigue
+  ausente o atípico.
+
+### \`evaluar_followup_mchat\`
+Aplica las reglas de scoring del Follow-Up (≥ 2 ítems FALLA →
+positivo) y devuelve la recomendación clínica.
+- **Cuándo invocarla:** inmediatamente después de recibir el output
+  de \`iniciar_followup_mchat\` con \`cancelado: false\`.
+- **Argumentos:**
+  - \`resultados_followup\` — el array recibido sin modificar.
+  - \`edad_meses\` — el mismo del Stage 1.
+  - \`score_stage1\` — el \`score\` original de \`evaluar_riesgo_mchat\`,
+    para que la salida lo conserve como referencia.
+- **No la uses si:** \`cancelado: true\`, o si el array está vacío.
+  En ese caso, ofrece reanudar el Follow-Up cuando el cuidador esté
+  listo.
 
 ### \`sugerir_ejercicios_denver\`
 Devuelve 2–3 misiones de juego ESDM adaptadas al área elegida.

@@ -189,6 +189,77 @@ export const sugerirEjerciciosDenverTool = tool({
 })
 
 /* -----------------------------------------------------------
+ * Tool 3.5 — iniciar_followup_mchat (client-side render)
+ * Stage 2 del M-CHAT-R/F. Se invoca cuando Stage 1 dio MEDIO
+ * (3-7 puntos) para reducir falsos positivos. Para cada ítem
+ * fallado el cuidador responde si el comportamiento PASA o FALLA.
+ * ----------------------------------------------------------- */
+export const iniciarFollowupMchatTool = tool({
+  description:
+    "Abre el formulario de Follow-Up del M-CHAT-R/F para clarificar ítems fallados.",
+  inputSchema: z.object({
+    items_fallados: z
+      .array(z.number().int().min(1).max(20))
+      .min(1)
+      .describe("Array de números de ítems que fallaron en Stage 1."),
+    edad_meses: z.number().int().min(16).max(30),
+    idioma: z.enum(["es", "en"]),
+  }),
+  outputSchema: z.object({
+    resultados_followup: z.array(
+      z.object({
+        item: z.number(),
+        // true = el ítem PASA (no riesgo), false = FALLA (riesgo persiste)
+        pasa: z.boolean(),
+      }),
+    ),
+    edad_meses: z.number().int(),
+    cancelado: z.boolean(),
+  }),
+})
+
+/* -----------------------------------------------------------
+ * Tool 3.6 — evaluar_followup_mchat (server-side execute)
+ * ----------------------------------------------------------- */
+export const evaluarFollowupMchatTool = tool({
+  description: "Evalúa los resultados del Follow-Up del M-CHAT-R/F.",
+  inputSchema: z.object({
+    resultados_followup: z.array(
+      z.object({
+        item: z.number(),
+        pasa: z.boolean(),
+      }),
+    ),
+    edad_meses: z.number().int().min(16).max(30),
+    score_stage1: z.number().int().min(0).max(20),
+  }),
+  execute: async ({ resultados_followup, edad_meses, score_stage1 }) => {
+    const itemsFallados = resultados_followup
+      .filter((r) => !r.pasa)
+      .map((r) => r.item)
+    const followUpScore = itemsFallados.length
+    const resultado: "positivo" | "negativo" =
+      followUpScore >= 2 ? "positivo" : "negativo"
+
+    const recomendacion =
+      resultado === "positivo"
+        ? "El resultado del Follow-Up confirma señales de riesgo. Se recomienda firmemente solicitar una evaluación diagnóstica formal con un neuropediatra o especialista en desarrollo infantil."
+        : "El Follow-Up no confirma riesgo significativo. Continuar observando el desarrollo y repetir el cribado si surgen nuevas preocupaciones."
+
+    return {
+      score_stage1,
+      followup_score: followUpScore,
+      resultado,
+      items_que_fallan_followup: itemsFallados,
+      total_items_evaluados: resultados_followup.length,
+      edad_meses,
+      recomendacion,
+      timestamp: new Date().toISOString(),
+    }
+  },
+})
+
+/* -----------------------------------------------------------
  * Tool 4 — solicitar_video (client-side render)
  * ----------------------------------------------------------- */
 export const solicitarVideoTool = tool({
@@ -264,6 +335,8 @@ export const analizarVideoConductaTool = tool({
 export const miraTools = {
   iniciar_cuestionario_mchat: iniciarCuestionarioMchatTool,
   evaluar_riesgo_mchat: evaluarRiesgoMchatTool,
+  iniciar_followup_mchat: iniciarFollowupMchatTool,
+  evaluar_followup_mchat: evaluarFollowupMchatTool,
   sugerir_ejercicios_denver: sugerirEjerciciosDenverTool,
   solicitar_video: solicitarVideoTool,
   analizar_video_conducta: analizarVideoConductaTool,

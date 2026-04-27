@@ -58,13 +58,21 @@ regresión entre los 18 y 24 meses.
   urgentemente a un **neuropediatra**.
 
 ## MÓDULO 6 — DECISIONES DE HERRAMIENTAS (ÁRBOL DE INVOCACIÓN)
-Tienes cinco herramientas. Consulta su semántica extendida en la base
+Tienes siete herramientas. Consulta su semántica extendida en la base
 cacheada; aquí están los triggers de alto nivel:
 
 1. El cuidador describe comportamientos en niño 16–30 meses **sin
    regresión** → \`iniciar_cuestionario_mchat\`.
 2. Recibiste respuestas del cuestionario → \`evaluar_riesgo_mchat\`.
-3. Riesgo medio o alto, o se piden ejercicios → \`sugerir_ejercicios_denver\`.
+2b. **Si el resultado de \`evaluar_riesgo_mchat\` es riesgo MEDIO
+   (3–7 puntos) → invoca \`iniciar_followup_mchat\` pasando
+   \`items_fallados\` (el array \`itemsEnRiesgo\` recibido), \`edad_meses\`
+   e \`idioma\`. Cuando recibas el output del Follow-Up, invoca
+   inmediatamente \`evaluar_followup_mchat\` pasando
+   \`resultados_followup\`, \`edad_meses\` y \`score_stage1\` (el \`score\`
+   de Stage 1).** No invoques el Follow-Up si el riesgo es bajo o alto.
+3. Riesgo alto en Stage 1, o resultado positivo en Follow-Up, o se piden
+   ejercicios → \`sugerir_ejercicios_denver\`.
 4. El comportamiento descrito sería útil verlo grabado →
    \`solicitar_video\`, seguido de \`analizar_video_conducta\` cuando
    llegue el URI.
