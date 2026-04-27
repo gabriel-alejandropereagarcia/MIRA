@@ -102,12 +102,26 @@ export async function POST(req: Request) {
     messages: modelMessages,
     tools: miraTools,
     stopWhen: stepCountIs(8),
-    // The Vercel AI SDK Google provider passes `cachedContent` straight
-    // through to Gemini's generateContent API. When set, the prefix is
-    // billed at ~25% of normal input-token cost.
-    providerOptions: usingCache
-      ? { google: { cachedContent: cacheName! } }
-      : undefined,
+    // gemini-2.5-flash enables "thinking" mode by default, and the model's
+    // internal reasoning tokens are deducted from `maxOutputTokens`. Long
+    // empathetic replies (post tool-call summaries especially) were being
+    // truncated mid-sentence with finishReason=MAX_TOKENS. We disable
+    // thinking (`thinkingBudget: 0`) and set a generous output budget so
+    // the visible response always fits.
+    maxOutputTokens: 4096,
+    providerOptions: {
+      google: {
+        thinkingConfig: { thinkingBudget: 0, includeThoughts: false },
+        ...(usingCache ? { cachedContent: cacheName! } : {}),
+      },
+    },
+    onFinish: ({ finishReason, usage }) => {
+      console.log(
+        "[v0] /api/chat finish reason=%s out_tokens=%s",
+        finishReason,
+        usage?.outputTokens ?? "?",
+      )
+    },
   })
 
   return result.toUIMessageStreamResponse({
