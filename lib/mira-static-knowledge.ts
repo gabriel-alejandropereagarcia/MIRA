@@ -269,6 +269,64 @@ navegador del cuidador como descarga directa.
 
 ---
 
+---
+
+## MÓDULO 7B — TRIANGULACIÓN OBJETIVA (RECETA EXTENDIDA)
+
+El cuestionario M-CHAT-R/F tiene una sensibilidad reportada de ~85%
+cuando se aplica solo. Significa que **uno de cada siete niños con
+TEA puede no ser detectado por el M-CHAT**. La estrategia de MIRA
+para mitigar este riesgo es la **triangulación objetiva**: cruzar
+tres fuentes independientes antes de comunicar tranquilidad.
+
+### Criterios de "Bandera Roja" en el chat
+Considera bandera roja conductual si el cuidador menciona alguno de
+los siguientes patrones, incluso si el M-CHAT da bajo:
+
+1. **Aislamiento social marcado:** "no busca a otros niños", "prefiere
+   estar solo todo el día", "no responde a otros niños".
+2. **Intereses restringidos / ritualísticos:** "siempre juega con lo
+   mismo", "alinea objetos por horas", "se obsesiona con detalles
+   específicos como ruedas o luces".
+3. **Hipersensibilidad o hiposensibilidad sensorial marcadas:** "no
+   tolera ciertas texturas", "se cubre los oídos siempre", "no parece
+   sentir dolor".
+4. **Retraso o regresión del lenguaje atípico:** lenguaje ausente,
+   ecolalia inusual, pérdida de palabras adquiridas (en regresión,
+   aplicar la regla de interrupción del Módulo 3).
+5. **Dificultad de imitación o juego simbólico:** "no juega a
+   imaginar", "no imita lo que hago".
+6. **Falta de atención conjunta funcional:** "no señala para mostrarme
+   cosas", "no sigue mi mirada".
+
+### El video como ÁRBITRO OBJETIVO
+
+Cuando hay discrepancia entre el M-CHAT bajo y las preocupaciones del
+cuidador o los hitos pendientes, el video se convierte en una tercera
+fuente que NO depende del juicio subjetivo del cuidador ni de un
+puntaje de cuestionario. Para que cumpla esa función:
+
+- **Duración objetivo:** 30–60 segundos. Más de 90 segundos rara vez
+  añade información útil y satura el análisis.
+- **Contenido objetivo:** el niño jugando libremente, idealmente con
+  un cuidador presente que interactúe naturalmente (sin dirigir la
+  cámara hacia respuestas concretas).
+- **Marcadores priorizados:** los que más ayudan a desempatar son
+  contacto visual y respuesta al nombre — ambos son rápidos de
+  evaluar visualmente y muy informativos en menores de 30 meses.
+
+### Lenguaje seguro al comunicar la discrepancia
+
+- "El cuestionario no detectó marcadores de riesgo, **pero**…" —
+  validar antes de matizar.
+- "**Triangular** con observación objetiva" — instala la idea de
+  rigor metodológico, no de duda hacia el cuidador.
+- Evitar absolutos: nunca "no tiene autismo", siempre "en este
+  momento no mostramos marcadores de riesgo". Nunca "tiene autismo"
+  (es un cribado).
+
+---
+
 ## NOTAS DE ESCALABILIDAD
 
 Si el cuidador menciona poseer resultados de **ADOS-2** o **CARS-2**,

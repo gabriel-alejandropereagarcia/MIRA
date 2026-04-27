@@ -27,6 +27,11 @@ import type { TriageState } from "@/components/mira/triage-sidebar"
 import { MessageText } from "@/components/mira/message-text"
 import { ThemeToggle } from "@/components/mira/theme-toggle"
 import type { ChildProfile } from "@/lib/mira-storage"
+import {
+  getMilestoneBucket,
+  getMilestonesForAge,
+  getObservedMilestones,
+} from "@/lib/milestones-data"
 
 type Props = {
   onStateChange: (state: TriageState) => void
@@ -54,6 +59,53 @@ export function ChatPanel({
   const profileRef = useRef<ChildProfile | undefined>(childProfile)
   profileRef.current = childProfile
 
+  /**
+   * `developmentalContext` is a small JSON-serializable snapshot of the
+   * caregiver's sidebar state that we ship with EACH chat request. It
+   * lets the model triangulate a low M-CHAT score against red-flag
+   * milestones the caregiver has not yet observed. Persisted in a ref
+   * for the same reason as `profileRef` — the transport is memoized once.
+   */
+  const devContextRef = useRef<{
+    redFlagMilestonesUnchecked: string[]
+    bucketLabel: string | null
+  } | null>(null)
+  const [, forceContextUpdate] = useState(0)
+
+  // Compute (and re-compute on profile change or storage event) which
+  // CDC red-flag milestones for the child's bucket are NOT yet ticked.
+  useEffect(() => {
+    function recompute() {
+      if (!childProfile) {
+        devContextRef.current = null
+        return
+      }
+      const bucket = getMilestoneBucket(childProfile.ageMonths)
+      const items = getMilestonesForAge(childProfile.ageMonths)
+      const observed = new Set(getObservedMilestones(childProfile.id))
+      const unchecked = items
+        .filter((m) => m.isRedFlag && !observed.has(m.id))
+        .map((m) => m.description_es)
+      devContextRef.current = {
+        redFlagMilestonesUnchecked: unchecked,
+        bucketLabel: bucket ? `${bucket} meses` : null,
+      }
+      forceContextUpdate((n) => n + 1)
+    }
+    recompute()
+    // Cross-tab + same-tab updates: the sidebar writes localStorage on
+    // each toggle, so we listen for storage events and also poll lightly
+    // via a custom event. The simplest portable mechanism is `storage`
+    // (cross-tab) plus a short interval fallback for the same tab.
+    const onStorage = () => recompute()
+    window.addEventListener("storage", onStorage)
+    const interval = window.setInterval(recompute, 1500)
+    return () => {
+      window.removeEventListener("storage", onStorage)
+      window.clearInterval(interval)
+    }
+  }, [childProfile])
+
   const transport = useMemo(
     () =>
       new DefaultChatTransport<MiraUIMessage>({
@@ -65,6 +117,7 @@ export function ChatPanel({
             trigger,
             messageId,
             childProfile: profileRef.current ?? null,
+            developmentalContext: devContextRef.current,
           },
         }),
       }),
@@ -133,6 +186,9 @@ export function ChatPanel({
       itemsFallados: number[]
     } | null = null
     let followUpRecomendacion: string | null = null
+    // Capture the most recent video analysis so the PDF's
+    // "Triangulación clínica" section can render the OBJECTIVE block.
+    let videoAnalysis: ReportData["videoAnalysis"] | null = null
 
     for (const m of messages) {
       for (const p of m.parts ?? []) {
@@ -160,6 +216,24 @@ export function ChatPanel({
           }
           followUpRecomendacion = o.recomendacion
         }
+        if (
+          p.type === "tool-analizar_video_conducta" &&
+          p.state === "output-available"
+        ) {
+          const o = p.output
+          videoAnalysis = {
+            resultados: o.resultados.map((r) => ({
+              marcador: r.marcador,
+              presencia: r.presencia,
+              confianza: r.confianza,
+              observacion: r.observacion,
+            })),
+            calidadVideo: o.calidad_video,
+            alertaClinica: o.alerta_clinica,
+            duracionSeg: o.duracion_analizada_seg,
+            nota: o.nota,
+          }
+        }
       }
     }
 
@@ -182,6 +256,8 @@ export function ChatPanel({
         recomendacion: followUpRecomendacion ?? mchat.recomendacion,
       },
       followUp: followUp ?? undefined,
+      videoAnalysis: videoAnalysis ?? undefined,
+      developmentalContext: devContextRef.current ?? undefined,
       date: new Date().toISOString(),
     }
   }, [messages, childProfile])

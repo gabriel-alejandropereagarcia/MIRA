@@ -29,7 +29,15 @@ type IncomingChildProfile = {
   concerns?: string[]
 } | null
 
-function renderChildContext(profile: IncomingChildProfile): string {
+type IncomingDevelopmentalContext = {
+  redFlagMilestonesUnchecked?: string[]
+  bucketLabel?: string | null
+} | null
+
+function renderChildContext(
+  profile: IncomingChildProfile,
+  devContext: IncomingDevelopmentalContext,
+): string {
   if (!profile || typeof profile !== "object") return ""
   const sexLabel =
     profile.sex === "M" ? "niño" : profile.sex === "F" ? "niña" : "sin especificar"
@@ -37,15 +45,44 @@ function renderChildContext(profile: IncomingChildProfile): string {
     profile.concerns && profile.concerns.length > 0
       ? profile.concerns.join(", ")
       : "ninguna declarada al inicio"
-  return [
+
+  const lines: string[] = [
     "### CONTEXTO DEL NIÑO (provisto por el cuidador en el intake)",
     `- Alias: ${profile.alias ?? "sin alias"}`,
     `- Edad: ${profile.ageMonths ?? "?"} meses (${sexLabel})`,
     `- Completa el intake: ${profile.guardian ?? "sin especificar"}`,
     `- Preocupaciones reportadas: ${concerns}`,
+  ]
+
+  // CDC red-flag milestones the caregiver has NOT yet ticked as observed.
+  // This array drives the "anti-false-negative" triangulation rule.
+  const unchecked = devContext?.redFlagMilestonesUnchecked ?? []
+  if (unchecked.length > 0) {
+    lines.push(
+      "",
+      `### HITOS DEL DESARROLLO — BANDERAS ROJAS NO OBSERVADAS${
+        devContext?.bucketLabel ? ` (lista CDC ${devContext.bucketLabel})` : ""
+      }`,
+      ...unchecked.map((m) => `- ${m}`),
+      "",
+      "**Importante:** estos hitos están marcados como banderas rojas por la CDC. Cada uno es una señal objetiva, INDEPENDIENTE del puntaje M-CHAT. Úsalos para triangular tu juicio clínico — especialmente si el M-CHAT da riesgo BAJO pero estos hitos siguen pendientes.",
+    )
+  } else if (devContext) {
+    lines.push(
+      "",
+      `### HITOS DEL DESARROLLO — BANDERAS ROJAS${
+        devContext?.bucketLabel ? ` (lista CDC ${devContext.bucketLabel})` : ""
+      }`,
+      "- Todas las banderas rojas para esta edad están marcadas como observadas.",
+    )
+  }
+
+  lines.push(
     "",
     "Usa este contexto en cada respuesta: dirígete al cuidador con calidez, usa el alias del niño/a, y ajusta las recomendaciones a la edad en meses. No solicites datos que ya aparezcan aquí.",
-  ].join("\n")
+  )
+
+  return lines.join("\n")
 }
 
 export async function POST(req: Request) {
@@ -56,7 +93,10 @@ export async function POST(req: Request) {
     tools: miraTools,
   })
 
-  const childContext = renderChildContext(body.childProfile as IncomingChildProfile)
+  const childContext = renderChildContext(
+    body.childProfile as IncomingChildProfile,
+    body.developmentalContext as IncomingDevelopmentalContext,
+  )
 
   // Try to reuse (or lazily create) the Gemini context cache.
   // If the cache isn't available (missing key, below token threshold,

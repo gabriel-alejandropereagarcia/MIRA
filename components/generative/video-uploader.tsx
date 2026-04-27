@@ -2,7 +2,20 @@
 
 import { useRef, useState } from "react"
 import { motion } from "framer-motion"
-import { AlertTriangle, CheckCircle2, Film, Loader2, Upload, X } from "lucide-react"
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Clock,
+  Eye,
+  Film,
+  Languages,
+  Lightbulb,
+  Loader2,
+  ShieldCheck,
+  Smile,
+  Upload,
+  X,
+} from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -25,6 +38,8 @@ const MARCADOR_LABEL: Record<Marcador, string> = {
 type Phase = "idle" | "uploading" | "processing" | "ready" | "error"
 
 const MAX_BYTES = 50 * 1024 * 1024
+const RECOMMENDED_MIN_SECONDS = 30
+const RECOMMENDED_MAX_SECONDS = 60
 
 type Props = {
   motivo: string
@@ -38,12 +53,30 @@ type Props = {
   disabled?: boolean
 }
 
+/**
+ * Two-step upload UX.
+ *
+ * Step 1 (`stage === "guide"`) — a calm pre-recording briefing that
+ * spells out exactly WHAT to record, HOW long, and WHAT NOT to record.
+ * The caregiver must explicitly acknowledge the privacy + consent
+ * checklist before they can move on. This is critical for the video to
+ * be useful as an "objective referee" in the triangulation flow: a
+ * well-framed clip of natural play yields signal; a directed,
+ * over-rehearsed clip yields noise.
+ *
+ * Step 2 (`stage === "upload"`) — the actual file picker, marker
+ * selection, and submit. Identical to the previous version's flow.
+ */
+type Stage = "guide" | "upload"
+
 export function VideoUploader({
   motivo,
   marcadoresSugeridos,
   onSubmit,
   disabled,
 }: Props) {
+  const [stage, setStage] = useState<Stage>("guide")
+  const [acknowledged, setAcknowledged] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [selected, setSelected] = useState<Marcador[]>(marcadoresSugeridos)
@@ -86,27 +119,17 @@ export function VideoUploader({
   async function submit() {
     if (!file || selected.length === 0 || isBusy) return
     setError(null)
-
-    // Optimistic UI: switch to "uploading" immediately. We move to
-    // "processing" once the request is in-flight, since the server
-    // polls Gemini's File API state internally.
     setPhase("uploading")
 
     const formData = new FormData()
     formData.append("video", file)
 
     try {
-      // Move into the processing phase as soon as the request is sent —
-      // the user sees a clear two-step progression even though both
-      // happen inside the same fetch() call from their perspective.
       const inflight = fetch("/api/upload-video", {
         method: "POST",
         body: formData,
       })
-      // Switch label after a brief delay so the "uploading" state is
-      // visible even on fast networks.
       const phaseTimer = setTimeout(() => setPhase("processing"), 600)
-
       const res = await inflight
       clearTimeout(phaseTimer)
 
@@ -140,6 +163,131 @@ export function VideoUploader({
     }
   }
 
+  function cancelAll() {
+    onSubmit({
+      video_uri: "",
+      mime_type: "",
+      marcadores: [],
+      cancelado: true,
+    })
+  }
+
+  /* ---------------- Step 1 — Guide ---------------- */
+  if (stage === "guide") {
+    return (
+      <Card className="w-full max-w-xl border-border/60 shadow-sm">
+        <CardHeader className="pb-3">
+          <div className="flex items-start gap-2">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Film className="size-5" />
+            </span>
+            <div className="flex-1">
+              <CardTitle className="text-base font-semibold">
+                Cómo grabar el video
+              </CardTitle>
+              <p className="mt-0.5 text-xs text-muted-foreground">{motivo}</p>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-[13px] leading-relaxed text-foreground/85">
+            Para que el análisis sea útil necesitamos que el video capture al
+            niño/a en una situación natural. Cuanto menos pongamos en escena,
+            más confiable será el resultado.
+          </p>
+
+          <section className="space-y-2.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+              Qué grabar
+            </h3>
+            <GuideRow
+              icon={<Smile className="size-4" />}
+              title="Juego libre con un familiar"
+              body="El niño/a jugando con sus juguetes habituales mientras un familiar interactúa de forma natural. No le pidas que mire a la cámara ni que haga algo específico."
+            />
+            <GuideRow
+              icon={<Languages className="size-4" />}
+              title="Llámalo por su nombre 1–2 veces"
+              body="Mientras juega, llámalo por su nombre con voz normal y deja unos segundos sin insistir. Esto nos permite evaluar la respuesta al nombre."
+            />
+            <GuideRow
+              icon={<Eye className="size-4" />}
+              title="Algún momento de interacción cara a cara"
+              body="Mostrarle un objeto interesante, pedirle algo simple o hacerlo reír. No fuerces el contacto visual; queremos ver cómo lo busca espontáneamente."
+            />
+          </section>
+
+          <section className="space-y-2.5">
+            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-primary">
+              Cómo grabarlo
+            </h3>
+            <GuideRow
+              icon={<Clock className="size-4" />}
+              title={`Duración: ${RECOMMENDED_MIN_SECONDS}–${RECOMMENDED_MAX_SECONDS} segundos`}
+              body="Con un minuto suele bastar. Si grabas más de 90 segundos el análisis pierde foco."
+            />
+            <GuideRow
+              icon={<Lightbulb className="size-4" />}
+              title="Buena luz y cámara estable"
+              body="Luz natural si es posible, niño/a centrado en el cuadro. Evita contraluz y movimientos bruscos de cámara — apoya el teléfono o usa modo horizontal."
+            />
+            <GuideRow
+              icon={<ShieldCheck className="size-4" />}
+              title="Sin baño, ni cambio de pañal, ni desnudez"
+              body="Por respeto al niño/a y por privacidad, evita esas situaciones. Si sales en la grabación, asegúrate de que estás cómodo/a con que un profesional lo vea."
+            />
+          </section>
+
+          <div
+            role="note"
+            className="rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-2.5 text-[12.5px] leading-relaxed text-amber-900 dark:bg-amber-950/30 dark:text-amber-100"
+          >
+            <p className="flex items-center gap-1.5 font-semibold">
+              <AlertTriangle className="size-3.5" />
+              Importante
+            </p>
+            <p className="mt-1">
+              El video se sube de forma cifrada y se procesa solo para este
+              análisis. <strong>No lo guardamos</strong> después de la sesión.
+              Si grabas a otra persona, asegúrate de tener su consentimiento.
+            </p>
+          </div>
+
+          <label
+            htmlFor="video-consent"
+            className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/70 bg-background px-3 py-2.5"
+          >
+            <input
+              id="video-consent"
+              type="checkbox"
+              checked={acknowledged}
+              onChange={(e) => setAcknowledged(e.target.checked)}
+              className="mt-0.5 size-4 rounded border-border accent-primary"
+            />
+            <span className="text-[12.5px] leading-snug text-foreground/90">
+              He leído las instrucciones y entiendo que el video se procesa de
+              forma confidencial únicamente para este análisis.
+            </span>
+          </label>
+
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <Button type="button" variant="ghost" onClick={cancelAll}>
+              Ahora no
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setStage("upload")}
+              disabled={!acknowledged}
+            >
+              Entendido — subir video
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  /* ---------------- Step 2 — Upload ---------------- */
   return (
     <Card className="w-full max-w-xl border-border/60 shadow-sm">
       <CardHeader className="pb-3">
@@ -156,6 +304,24 @@ export function VideoUploader({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {/* Recap pill */}
+        <button
+          type="button"
+          onClick={() => !lockUI && setStage("guide")}
+          disabled={lockUI}
+          className="flex w-full items-center justify-between gap-2 rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-left text-[12px] text-muted-foreground transition-colors hover:bg-muted/70 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <span>
+            <span className="font-medium text-foreground">
+              {RECOMMENDED_MIN_SECONDS}–{RECOMMENDED_MAX_SECONDS} s
+            </span>{" "}
+            · juego libre · buena luz · sin redirigir
+          </span>
+          <span className="text-[11px] underline-offset-2 hover:underline">
+            Ver instrucciones
+          </span>
+        </button>
+
         {/* Dropzone */}
         <div
           role="button"
@@ -228,7 +394,8 @@ export function VideoUploader({
                 Arrastra un video o haz clic para subir
               </p>
               <p className="text-xs text-muted-foreground">
-                MP4, MOV · máx 50 MB · 2 minutos recomendado
+                MP4, MOV · máx 50 MB · {RECOMMENDED_MIN_SECONDS}–
+                {RECOMMENDED_MAX_SECONDS} segundos recomendado
               </p>
             </>
           )}
@@ -298,14 +465,7 @@ export function VideoUploader({
             <Button
               type="button"
               variant="ghost"
-              onClick={() =>
-                onSubmit({
-                  video_uri: "",
-                  mime_type: "",
-                  marcadores: [],
-                  cancelado: true,
-                })
-              }
+              onClick={cancelAll}
               disabled={lockUI}
             >
               Cancelar
@@ -329,6 +489,32 @@ export function VideoUploader({
 }
 
 /* -------------------------------- helpers -------------------------------- */
+
+function GuideRow({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode
+  title: string
+  body: string
+}) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-lg border border-border/60 bg-muted/30 px-3 py-2">
+      <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-[13px] font-medium leading-snug text-foreground">
+          {title}
+        </p>
+        <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
+          {body}
+        </p>
+      </div>
+    </div>
+  )
+}
 
 function StatusRow({
   tone,

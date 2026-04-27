@@ -27,6 +27,13 @@ import {
 
 export type Sex = "M" | "F" | "otro"
 
+export type VideoMarkerResult = {
+  marcador: string
+  presencia: "presente" | "inconsistente" | "ausente" | "no_evaluable"
+  confianza: number
+  observacion: string
+}
+
 export type ReportData = {
   child: {
     alias: string
@@ -46,6 +53,28 @@ export type ReportData = {
     score: number
     resultado: "positivo" | "negativo"
     itemsFallados: number[]
+  }
+  /**
+   * Optional: latest video analysis from `analizar_video_conducta`.
+   * When present, the report renders the "Triangulación clínica" section
+   * comparing subjective signals (parents/M-CHAT) with objective signals
+   * (AI video analysis).
+   */
+  videoAnalysis?: {
+    resultados: VideoMarkerResult[]
+    calidadVideo: "buena" | "aceptable" | "baja"
+    alertaClinica: boolean
+    duracionSeg: number
+    nota: string
+  }
+  /**
+   * Optional: structured snapshot of caregiver-reported concerns and any
+   * CDC red-flag milestones the caregiver did NOT check as observed in the
+   * sidebar. Drives the "Subjetivo" half of the triangulation.
+   */
+  developmentalContext?: {
+    redFlagMilestonesUnchecked: string[]
+    bucketLabel: string | null
   }
   date: string // ISO timestamp
 }
@@ -252,6 +281,93 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
   },
 
+  /* Triangulación */
+  triPanel: {
+    border: `0.6pt solid ${BORDER}`,
+    borderRadius: 3,
+    padding: 0,
+    overflow: "hidden",
+    marginBottom: 8,
+  },
+  triHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 9,
+    borderBottom: `0.6pt solid ${BORDER}`,
+  },
+  triHeaderTag: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 2,
+    marginRight: 8,
+    letterSpacing: 0.5,
+  },
+  triHeaderTitle: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9.5,
+    color: NAVY,
+  },
+  triBody: {
+    padding: 9,
+    fontSize: 9.5,
+    lineHeight: 1.45,
+  },
+  triRow: {
+    flexDirection: "row",
+    paddingVertical: 3,
+  },
+  triRowFirst: { paddingTop: 0 },
+  triRowLabel: {
+    width: 90,
+    color: NAVY_LIGHT,
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9,
+  },
+  triRowValue: { flex: 1, fontSize: 9.5 },
+  markerRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingVertical: 4,
+    borderBottom: `0.4pt solid ${BORDER}`,
+  },
+  markerName: {
+    width: 110,
+    fontFamily: "Helvetica-Bold",
+    color: NAVY_LIGHT,
+    fontSize: 9.5,
+  },
+  markerStatus: {
+    width: 70,
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
+  },
+  markerObservation: { flex: 1, fontSize: 9, color: TEXT },
+  conclusionBox: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 3,
+    border: `0.8pt solid ${NAVY}`,
+    backgroundColor: BG_SUBTLE,
+  },
+  conclusionLabel: {
+    fontFamily: "Helvetica-Bold",
+    fontSize: 9,
+    color: NAVY,
+    textTransform: "uppercase",
+    letterSpacing: 0.6,
+    marginBottom: 4,
+  },
+  conclusionText: {
+    fontSize: 10,
+    color: TEXT,
+    lineHeight: 1.5,
+  },
+
   /* Footer */
   footer: {
     position: "absolute",
@@ -320,13 +436,122 @@ function riskLabel(r: "bajo" | "medio" | "alto"): string {
   return r === "bajo" ? "BAJO" : r === "medio" ? "MEDIO" : "ALTO"
 }
 
+const MARKER_LABEL: Record<string, string> = {
+  contacto_visual: "Contacto visual",
+  respuesta_nombre: "Respuesta al nombre",
+  aleteo_manos: "Movimientos repetitivos",
+  senalamiento: "Señalamiento",
+}
+
+function markerLabel(m: string): string {
+  return MARKER_LABEL[m] ?? m.replace(/_/g, " ")
+}
+
+const PRESENCE_PALETTE: Record<
+  VideoMarkerResult["presencia"],
+  { color: string; label: string }
+> = {
+  presente: { color: "#065f46", label: "Presente" },
+  inconsistente: { color: "#92400e", label: "Inconsistente" },
+  ausente: { color: "#991b1b", label: "Ausente" },
+  no_evaluable: { color: MUTED, label: "No evaluable" },
+}
+
+const QUALITY_LABEL: Record<
+  NonNullable<ReportData["videoAnalysis"]>["calidadVideo"],
+  string
+> = {
+  buena: "Buena",
+  aceptable: "Aceptable",
+  baja: "Baja",
+}
+
+/**
+ * Compose the "balanced conclusion" paragraph that the pediatrician will
+ * read first in the triangulation section. The function is intentionally
+ * deterministic so the language stays auditable and never claims a
+ * diagnosis. Logic:
+ *
+ *  - If the M-CHAT (or Follow-Up) is positive AND the video confirms
+ *    absent/inconsistent markers: reinforce the recommendation to seek
+ *    professional evaluation.
+ *  - If the M-CHAT is low (0–2) but red-flag milestones are unchecked
+ *    OR caregiver concerns exist AND the video shows mostly present
+ *    markers: present the discrepancy as reassuring without dismissing
+ *    the caregiver's concern.
+ *  - If the M-CHAT is low and the video shows absent markers: flag the
+ *    discrepancy and recommend pediatric evaluation without naming
+ *    autism.
+ *  - Default: neutral synthesis pointing to the next clinical step.
+ */
+function buildTriangulationConclusion(data: ReportData): string {
+  const { mchat, followUp, videoAnalysis, developmentalContext } = data
+  const hasVideo = !!videoAnalysis && videoAnalysis.resultados.length > 0
+  const evaluables = (videoAnalysis?.resultados ?? []).filter(
+    (r) => r.presencia !== "no_evaluable",
+  )
+  const ausenteCount = evaluables.filter(
+    (r) => r.presencia === "ausente",
+  ).length
+  const presenteCount = evaluables.filter(
+    (r) => r.presencia === "presente",
+  ).length
+  const followUpPositive = followUp?.resultado === "positivo"
+  const subjetivoAlto =
+    mchat.riesgo === "alto" ||
+    (mchat.riesgo === "medio" && followUpPositive)
+
+  const subjetivoBajoConPreocupacion =
+    mchat.riesgo === "bajo" &&
+    (data.child.concerns.length > 0 ||
+      (developmentalContext?.redFlagMilestonesUnchecked.length ?? 0) > 0)
+
+  if (subjetivoAlto && hasVideo && ausenteCount > presenteCount) {
+    return "Tanto los datos reportados por el cuidador como la observación objetiva por video muestran señales coincidentes de riesgo. Se recomienda priorizar una evaluación pediátrica del desarrollo para una valoración integral."
+  }
+
+  if (subjetivoBajoConPreocupacion && hasVideo && ausenteCount === 0 && presenteCount > 0) {
+    return "El cuestionario M-CHAT-R/F arroja riesgo bajo y la observación objetiva por video muestra los marcadores conductuales clave presentes. Las preocupaciones reportadas por el cuidador pueden enmarcarse en variabilidad típica del desarrollo, sin que ello reemplace el seguimiento pediátrico habitual."
+  }
+
+  if (subjetivoBajoConPreocupacion && hasVideo && ausenteCount > 0) {
+    return "Aunque el cuestionario M-CHAT-R/F clasifica el riesgo como bajo, la observación objetiva por video y las preocupaciones del cuidador apuntan a marcadores conductuales que merecen seguimiento. Se sugiere una evaluación pediátrica del desarrollo para precisar el cuadro y descartar áreas de retraso."
+  }
+
+  if (subjetivoAlto && !hasVideo) {
+    return "Los datos del cribado indican señales de riesgo. Se recomienda completar la valoración con observación directa por un profesional y, si es posible, aportar un video breve del niño/a para enriquecer la triangulación."
+  }
+
+  if (mchat.riesgo === "bajo" && !subjetivoBajoConPreocupacion && !hasVideo) {
+    return "El cribado no muestra señales de riesgo significativas en este momento. Se recomienda continuar con el seguimiento pediátrico habitual y repetir el cribado si surgen nuevas preocupaciones."
+  }
+
+  return "Los datos disponibles requieren integración clínica. Se sugiere una consulta pediátrica del desarrollo donde se contraste este informe con la exploración directa del niño/a."
+}
+
 /* ------------------------------------------------------------------------ */
 /*  Document                                                                */
 /* ------------------------------------------------------------------------ */
 
 export function MiraReportDocument({ data }: { data: ReportData }) {
-  const { child, mchat, followUp, date } = data
+  const { child, mchat, followUp, videoAnalysis, developmentalContext, date } = data
   const risk = RISK_COLORS[mchat.riesgo]
+
+  // Section numbering is dynamic because Follow-Up and Triangulation
+  // are both optional. We compute labels once so each section header
+  // and the page footer agree.
+  let n = 2 // sections start at 2 (1 = child data)
+  const sectionMchat = ++n - 1 // 2
+  const sectionFollowUp = followUp ? ++n - 1 : null
+  const hasTriangulation =
+    !!videoAnalysis ||
+    (developmentalContext?.redFlagMilestonesUnchecked.length ?? 0) > 0
+  const sectionTriangulation = hasTriangulation ? ++n - 1 : null
+  const sectionRecommendation = ++n - 1
+  const sectionProfessionalNote = ++n - 1
+  // Suppress unused-var warning while keeping the numbering self-documenting.
+  void sectionMchat
+  const conclusionText = buildTriangulationConclusion(data)
 
   return (
     <Document
@@ -464,11 +689,11 @@ export function MiraReportDocument({ data }: { data: ReportData }) {
           </View>
         </View>
 
-        {/* SECCIÓN 3 — Follow-Up (si aplica) */}
+        {/* SECCIÓN — Follow-Up (si aplica) */}
         {followUp && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>
-              3. Resultado Follow-Up · Etapa 2
+              {sectionFollowUp}. Resultado Follow-Up · Etapa 2
             </Text>
             <View style={styles.sectionBody}>
               <View
@@ -545,20 +770,189 @@ export function MiraReportDocument({ data }: { data: ReportData }) {
           </View>
         )}
 
-        {/* SECCIÓN 4 — Recomendación clínica */}
+        {/* SECCIÓN — Triangulación clínica (si hay video o banderas rojas) */}
+        {hasTriangulation && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>
+              {sectionTriangulation}. Triangulación clínica
+            </Text>
+
+            {/* SUBJETIVO — datos del cuidador */}
+            <View style={styles.triPanel}>
+              <View style={styles.triHeaderRow}>
+                <Text
+                  style={[
+                    styles.triHeaderTag,
+                    { backgroundColor: NAVY_LIGHT, color: "#ffffff" },
+                  ]}
+                >
+                  SUBJETIVO
+                </Text>
+                <Text style={styles.triHeaderTitle}>
+                  Reporte del cuidador y cribado M-CHAT-R/F
+                </Text>
+              </View>
+              <View style={styles.triBody}>
+                <View style={[styles.triRow, styles.triRowFirst]}>
+                  <Text style={styles.triRowLabel}>Puntaje M-CHAT</Text>
+                  <Text style={styles.triRowValue}>
+                    {mchat.score} / 20 — riesgo {riskLabel(mchat.riesgo)}
+                    {followUp
+                      ? ` · Follow-Up: ${
+                          followUp.resultado === "positivo"
+                            ? "POSITIVO"
+                            : "NEGATIVO"
+                        }`
+                      : ""}
+                  </Text>
+                </View>
+                <View style={styles.triRow}>
+                  <Text style={styles.triRowLabel}>Preocupaciones</Text>
+                  <View style={{ flex: 1 }}>
+                    {child.concerns.length === 0 ? (
+                      <Text style={styles.triRowValue}>
+                        No se reportaron preocupaciones específicas.
+                      </Text>
+                    ) : (
+                      child.concerns.map((c, i) => (
+                        <View key={i} style={styles.concernItem}>
+                          <Text style={styles.concernBullet}>•</Text>
+                          <Text style={styles.concernText}>{c}</Text>
+                        </View>
+                      ))
+                    )}
+                  </View>
+                </View>
+                {developmentalContext &&
+                  developmentalContext.redFlagMilestonesUnchecked.length > 0 && (
+                    <View style={styles.triRow}>
+                      <Text style={styles.triRowLabel}>
+                        Hitos no observados
+                        {developmentalContext.bucketLabel
+                          ? ` (${developmentalContext.bucketLabel})`
+                          : ""}
+                      </Text>
+                      <View style={{ flex: 1 }}>
+                        {developmentalContext.redFlagMilestonesUnchecked.map(
+                          (m, i) => (
+                            <View key={i} style={styles.concernItem}>
+                              <Text style={styles.concernBullet}>•</Text>
+                              <Text style={styles.concernText}>{m}</Text>
+                            </View>
+                          ),
+                        )}
+                      </View>
+                    </View>
+                  )}
+              </View>
+            </View>
+
+            {/* OBJETIVO — análisis IA del video */}
+            {videoAnalysis ? (
+              <View style={styles.triPanel}>
+                <View style={styles.triHeaderRow}>
+                  <Text
+                    style={[
+                      styles.triHeaderTag,
+                      { backgroundColor: "#0f766e", color: "#ffffff" },
+                    ]}
+                  >
+                    OBJETIVO
+                  </Text>
+                  <Text style={styles.triHeaderTitle}>
+                    Observación por video (análisis asistido por IA)
+                  </Text>
+                </View>
+                <View style={styles.triBody}>
+                  <View style={[styles.triRow, styles.triRowFirst]}>
+                    <Text style={styles.triRowLabel}>Duración analizada</Text>
+                    <Text style={styles.triRowValue}>
+                      {videoAnalysis.duracionSeg} segundos · calidad{" "}
+                      {QUALITY_LABEL[videoAnalysis.calidadVideo]}
+                    </Text>
+                  </View>
+                  <View style={{ marginTop: 6 }}>
+                    {videoAnalysis.resultados.map((r, i) => {
+                      const palette = PRESENCE_PALETTE[r.presencia]
+                      const isLast =
+                        i === videoAnalysis.resultados.length - 1
+                      return (
+                        <View
+                          key={i}
+                          style={[
+                            styles.markerRow,
+                            isLast ? { borderBottom: 0 } : {},
+                          ]}
+                        >
+                          <Text style={styles.markerName}>
+                            {markerLabel(r.marcador)}
+                          </Text>
+                          <Text
+                            style={[styles.markerStatus, { color: palette.color }]}
+                          >
+                            {palette.label}
+                          </Text>
+                          <Text style={styles.markerObservation}>
+                            {r.observacion}
+                            {r.confianza > 0
+                              ? ` (confianza ${Math.round(r.confianza * 100)}%)`
+                              : ""}
+                          </Text>
+                        </View>
+                      )
+                    })}
+                  </View>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.triPanel}>
+                <View style={styles.triHeaderRow}>
+                  <Text
+                    style={[
+                      styles.triHeaderTag,
+                      { backgroundColor: BORDER, color: TEXT },
+                    ]}
+                  >
+                    OBJETIVO
+                  </Text>
+                  <Text style={styles.triHeaderTitle}>
+                    Observación por video — no aportada
+                  </Text>
+                </View>
+                <View style={styles.triBody}>
+                  <Text style={styles.triRowValue}>
+                    En esta sesión no se aportó un video para análisis. Se
+                    recomienda al pediatra registrar observación clínica
+                    directa al recibir este informe.
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* CONCLUSIÓN EQUILIBRADA */}
+            <View style={styles.conclusionBox}>
+              <Text style={styles.conclusionLabel}>
+                Conclusión equilibrada
+              </Text>
+              <Text style={styles.conclusionText}>{conclusionText}</Text>
+            </View>
+          </View>
+        )}
+
+        {/* SECCIÓN — Recomendación clínica */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {followUp ? "4" : "3"}. Recomendación clínica
+            {sectionRecommendation}. Recomendación clínica
           </Text>
           <View style={styles.recommendationBox}>
             <Text style={styles.recommendationText}>{mchat.recomendacion}</Text>
           </View>
         </View>
 
-        {/* SECCIÓN 5 — Nota para el profesional */}
+        {/* SECCIÓN — Nota para el profesional */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
-            {followUp ? "5" : "4"}. Nota para el profesional
+            {sectionProfessionalNote}. Nota para el profesional
           </Text>
           <View style={styles.sectionBody}>
             <Text style={styles.professionalNote}>
