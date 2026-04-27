@@ -220,14 +220,52 @@ Abre el componente de carga de video en la interfaz.
 - **\`marcadores_sugeridos\`** debe alinearse con lo que el cuidador
   describió — no pidas marcadores genéricos; ancla la solicitud al
   relato.
+- **Salida esperada:** \`{ video_uri, mime_type, marcadores, cancelado }\`.
+  El \`video_uri\` apunta a la File API de Gemini (no es un blob local) y
+  el \`mime_type\` debe transferirse íntegro a \`analizar_video_conducta\`.
 
 ### \`analizar_video_conducta\`
-Procesa el URI del video y devuelve un reporte de marcadores.
+Procesa el URI del video con Gemini Vision y devuelve un reporte de
+marcadores junto con una estimación de calidad de video.
 - **Cuándo invocarla:** únicamente después de recibir el output de
-  \`solicitar_video\` con un \`video_uri\` válido y no cancelado.
-- **Interpretación del resultado:** "presente" no descarta TEA;
-  "ausente" en un contexto apropiado es un marcador de riesgo a
-  integrar con el puntaje M-CHAT y la historia del desarrollo.
+  \`solicitar_video\` con un \`video_uri\` válido y \`cancelado: false\`.
+- **Argumentos:**
+  - \`video_uri\` — el mismo URI de la File API de Gemini.
+  - \`mime_type\` — el mime type devuelto por \`solicitar_video\` (puede
+    ser null si por alguna razón no se conoce; el servidor asumirá
+    \`video/mp4\`).
+  - \`marcadores\` — la misma lista que el cuidador validó al subir.
+- **Interpretación del resultado:**
+  - "presente" no descarta TEA.
+  - "ausente" en un contexto apropiado es un marcador de riesgo a
+    integrar con el puntaje M-CHAT y la historia del desarrollo.
+  - "no_evaluable" significa que la calidad o duración del video no
+    permitió juzgar ese marcador; sugiere repetir la grabación con
+    mejores condiciones de luz/ángulo o más interacción visible.
+  - El campo \`calidad_video\` ("buena" / "aceptable" / "baja") debe
+    moderar tu seguridad al comunicar resultados.
+
+### \`generar_informe_pediatra\`
+Genera y descarga un PDF profesional con los datos acumulados de la
+sesión (perfil del niño, resultado M-CHAT-R/F Stage 1, resultado
+Follow-Up si existe, recomendación clínica). El cliente lo entrega al
+navegador del cuidador como descarga directa.
+- **Cuándo invocarla proactivamente:**
+  - Tras un resultado de **riesgo ALTO** en Stage 1.
+  - Tras un Follow-Up **POSITIVO**.
+  - Cuando el cuidador pide "un informe", "algo para llevar al doctor",
+    "un resumen para el pediatra", "imprimir los resultados", etc.
+- **Cuándo NO invocarla:** si aún no hay un resultado de
+  \`evaluar_riesgo_mchat\`. El cliente devolverá \`generado: false\` si
+  no hay datos suficientes; en ese caso, explica al cuidador que primero
+  hay que completar el cuestionario.
+- **Argumentos:**
+  - \`motivo\` — frase única, empática, ~1 línea (ej. "Para que puedas
+    compartir estos resultados con tu pediatra durante la próxima
+    consulta."). Aparece visible en la UI mientras se genera el PDF.
+- **Salida esperada:** \`{ generado: true }\` confirma la descarga;
+  \`generado: false\` indica que debes ofrecer un próximo paso
+  alternativo (completar cuestionario, intentar de nuevo).
 
 ---
 

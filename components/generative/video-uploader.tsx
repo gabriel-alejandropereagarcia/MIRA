@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react"
 import { motion } from "framer-motion"
-import { Film, Upload, X, CheckCircle2 } from "lucide-react"
+import { AlertTriangle, CheckCircle2, Film, Loader2, Upload, X } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -21,11 +21,17 @@ const MARCADOR_LABEL: Record<Marcador, string> = {
   senalamiento: "Señalamiento",
 }
 
+/** UI phases for the upload pipeline. */
+type Phase = "idle" | "uploading" | "processing" | "ready" | "error"
+
+const MAX_BYTES = 50 * 1024 * 1024
+
 type Props = {
   motivo: string
   marcadoresSugeridos: Marcador[]
   onSubmit: (result: {
     video_uri: string
+    mime_type: string
     marcadores: Marcador[]
     cancelado: boolean
   }) => void
@@ -41,25 +47,97 @@ export function VideoUploader({
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [selected, setSelected] = useState<Marcador[]>(marcadoresSugeridos)
+  const [phase, setPhase] = useState<Phase>("idle")
+  const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const isBusy = phase === "uploading" || phase === "processing"
+  const lockUI = isBusy || disabled
 
   function handleFile(f: File | null) {
     if (!f) return
-    if (!f.type.startsWith("video/")) return
+    if (!f.type.startsWith("video/")) {
+      setError("El archivo seleccionado no es un video.")
+      return
+    }
+    if (f.size > MAX_BYTES) {
+      setError("Ese video supera los 50 MB. Recorta o comprime e intenta de nuevo.")
+      return
+    }
+    setError(null)
     setFile(f)
   }
 
   function toggleMarker(m: Marcador) {
+    if (lockUI) return
     setSelected((s) =>
       s.includes(m) ? s.filter((x) => x !== m) : [...s, m],
     )
   }
 
-  function submit() {
-    if (!file || selected.length === 0) return
-    // Simulated URI — in production we'd upload to storage
-    const video_uri = `mira://video/${encodeURIComponent(file.name)}#${file.size}`
-    onSubmit({ video_uri, marcadores: selected, cancelado: false })
+  function reset() {
+    if (lockUI) return
+    setFile(null)
+    setError(null)
+    setPhase("idle")
+    if (inputRef.current) inputRef.current.value = ""
+  }
+
+  async function submit() {
+    if (!file || selected.length === 0 || isBusy) return
+    setError(null)
+
+    // Optimistic UI: switch to "uploading" immediately. We move to
+    // "processing" once the request is in-flight, since the server
+    // polls Gemini's File API state internally.
+    setPhase("uploading")
+
+    const formData = new FormData()
+    formData.append("video", file)
+
+    try {
+      // Move into the processing phase as soon as the request is sent —
+      // the user sees a clear two-step progression even though both
+      // happen inside the same fetch() call from their perspective.
+      const inflight = fetch("/api/upload-video", {
+        method: "POST",
+        body: formData,
+      })
+      // Switch label after a brief delay so the "uploading" state is
+      // visible even on fast networks.
+      const phaseTimer = setTimeout(() => setPhase("processing"), 600)
+
+      const res = await inflight
+      clearTimeout(phaseTimer)
+
+      if (!res.ok) {
+        const body = (await res.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(body?.error || "No se pudo procesar el video.")
+      }
+
+      const data = (await res.json()) as {
+        fileUri: string
+        mimeType: string
+        name: string
+      }
+
+      setPhase("ready")
+      onSubmit({
+        video_uri: data.fileUri,
+        mime_type: data.mimeType,
+        marcadores: selected,
+        cancelado: false,
+      })
+    } catch (err) {
+      console.log("[v0] video upload failed:", (err as Error).message)
+      setPhase("error")
+      setError(
+        (err as Error).message ||
+          "No se pudo subir el video. Revisa tu conexión e intenta de nuevo.",
+      )
+    }
   }
 
   return (
@@ -83,16 +161,19 @@ export function VideoUploader({
           role="button"
           tabIndex={0}
           aria-label="Zona de carga de video"
-          onClick={() => inputRef.current?.click()}
+          onClick={() => !lockUI && inputRef.current?.click()}
           onKeyDown={(e) => {
+            if (lockUI) return
             if (e.key === "Enter" || e.key === " ") inputRef.current?.click()
           }}
           onDragOver={(e) => {
+            if (lockUI) return
             e.preventDefault()
             setDragOver(true)
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={(e) => {
+            if (lockUI) return
             e.preventDefault()
             setDragOver(false)
             handleFile(e.dataTransfer.files?.[0] ?? null)
@@ -102,7 +183,7 @@ export function VideoUploader({
             dragOver
               ? "border-primary bg-primary/5"
               : "border-border bg-muted/40 hover:bg-muted/70",
-            disabled && "pointer-events-none opacity-60",
+            lockUI && "pointer-events-none opacity-60",
           )}
         >
           <input
@@ -116,11 +197,11 @@ export function VideoUploader({
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
-              className="flex items-center gap-3"
+              className="flex w-full items-center gap-3"
             >
-              <CheckCircle2 className="size-6 text-[color:var(--risk-low)]" />
-              <div className="text-left">
-                <p className="text-sm font-medium">{file.name}</p>
+              <CheckCircle2 className="size-6 shrink-0 text-[color:var(--risk-low)]" />
+              <div className="min-w-0 flex-1 text-left">
+                <p className="truncate text-sm font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">
                   {(file.size / (1024 * 1024)).toFixed(2)} MB · video listo
                 </p>
@@ -132,9 +213,9 @@ export function VideoUploader({
                 className="ml-2"
                 onClick={(e) => {
                   e.stopPropagation()
-                  setFile(null)
-                  if (inputRef.current) inputRef.current.value = ""
+                  reset()
                 }}
+                disabled={lockUI}
               >
                 <X className="size-4" />
                 <span className="sr-only">Quitar video</span>
@@ -147,11 +228,37 @@ export function VideoUploader({
                 Arrastra un video o haz clic para subir
               </p>
               <p className="text-xs text-muted-foreground">
-                MP4, MOV · hasta 2 minutos recomendado
+                MP4, MOV · máx 50 MB · 2 minutos recomendado
               </p>
             </>
           )}
         </div>
+
+        {/* Status feedback (loading / error) */}
+        {phase === "uploading" && (
+          <StatusRow tone="info">
+            <Loader2 className="size-4 animate-spin" />
+            Subiendo video…
+          </StatusRow>
+        )}
+        {phase === "processing" && (
+          <StatusRow tone="info">
+            <Loader2 className="size-4 animate-spin" />
+            Procesando con Gemini…
+          </StatusRow>
+        )}
+        {phase === "ready" && (
+          <StatusRow tone="success">
+            <CheckCircle2 className="size-4" />
+            Listo. Iniciando análisis…
+          </StatusRow>
+        )}
+        {phase === "error" && error && (
+          <StatusRow tone="error">
+            <AlertTriangle className="size-4" />
+            {error}
+          </StatusRow>
+        )}
 
         {/* Marcadores */}
         <div>
@@ -166,11 +273,13 @@ export function VideoUploader({
                   key={m}
                   type="button"
                   onClick={() => toggleMarker(m)}
+                  disabled={lockUI}
                   className={cn(
                     "rounded-full border px-3 py-1 text-xs transition-colors",
                     active
                       ? "border-primary bg-primary/10 text-primary"
                       : "border-border bg-background text-muted-foreground hover:bg-muted",
+                    lockUI && "cursor-not-allowed opacity-60 hover:bg-background",
                   )}
                   aria-pressed={active}
                 >
@@ -190,22 +299,59 @@ export function VideoUploader({
               type="button"
               variant="ghost"
               onClick={() =>
-                onSubmit({ video_uri: "", marcadores: [], cancelado: true })
+                onSubmit({
+                  video_uri: "",
+                  mime_type: "",
+                  marcadores: [],
+                  cancelado: true,
+                })
               }
-              disabled={disabled}
+              disabled={lockUI}
             >
               Cancelar
             </Button>
             <Button
               type="button"
               onClick={submit}
-              disabled={!file || selected.length === 0 || disabled}
+              disabled={!file || selected.length === 0 || lockUI}
             >
-              Enviar para análisis
+              {phase === "uploading"
+                ? "Subiendo…"
+                : phase === "processing"
+                  ? "Procesando…"
+                  : "Enviar para análisis"}
             </Button>
           </div>
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+/* -------------------------------- helpers -------------------------------- */
+
+function StatusRow({
+  tone,
+  children,
+}: {
+  tone: "info" | "success" | "error"
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={cn(
+        "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium",
+        tone === "info" &&
+          "border-primary/30 bg-primary/5 text-primary",
+        tone === "success" &&
+          "border-[color:var(--risk-low)]/30 bg-[color:var(--risk-low)]/10 text-[color:var(--risk-low)]",
+        tone === "error" &&
+          "border-destructive/30 bg-destructive/10 text-destructive",
+      )}
+    >
+      {children}
+    </div>
   )
 }

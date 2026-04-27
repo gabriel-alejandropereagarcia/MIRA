@@ -18,6 +18,11 @@ import { VideoUploader } from "@/components/generative/video-uploader"
 import { VideoAnalysisCard } from "@/components/generative/video-analysis-card"
 import { MchatQuestionnaire } from "@/components/generative/mchat-questionnaire"
 import { MchatFollowUp } from "@/components/generative/mchat-followup"
+import {
+  AutoDownloadReport,
+  DownloadReportButton,
+} from "@/components/mira/report-generator"
+import type { ReportData } from "@/components/mira/report-document"
 import type { TriageState } from "@/components/mira/triage-sidebar"
 import { MessageText } from "@/components/mira/message-text"
 import { ThemeToggle } from "@/components/mira/theme-toggle"
@@ -108,6 +113,97 @@ export function ChatPanel({
       }
     }
     return state
+  }, [messages])
+
+  // Build the ReportData snapshot from the latest M-CHAT outputs in the
+  // conversation. Returns null when there is no Stage 1 result yet — the
+  // PDF cannot be meaningfully generated without it.
+  const reportData = useMemo<ReportData | null>(() => {
+    if (!childProfile) return null
+
+    let mchat: {
+      score: number
+      riesgo: "bajo" | "medio" | "alto"
+      itemsEnRiesgo: number[]
+      recomendacion: string
+    } | null = null
+    let followUp: {
+      score: number
+      resultado: "positivo" | "negativo"
+      itemsFallados: number[]
+    } | null = null
+    let followUpRecomendacion: string | null = null
+
+    for (const m of messages) {
+      for (const p of m.parts ?? []) {
+        if (
+          p.type === "tool-evaluar_riesgo_mchat" &&
+          p.state === "output-available"
+        ) {
+          const o = p.output
+          mchat = {
+            score: o.score,
+            riesgo: o.riesgo,
+            itemsEnRiesgo: [...o.itemsEnRiesgo],
+            recomendacion: o.recomendacion,
+          }
+        }
+        if (
+          p.type === "tool-evaluar_followup_mchat" &&
+          p.state === "output-available"
+        ) {
+          const o = p.output
+          followUp = {
+            score: o.followup_score,
+            resultado: o.resultado,
+            itemsFallados: [...o.items_que_fallan_followup],
+          }
+          followUpRecomendacion = o.recomendacion
+        }
+      }
+    }
+
+    if (!mchat) return null
+
+    return {
+      child: {
+        alias: childProfile.alias,
+        ageMonths: childProfile.ageMonths,
+        birthDate: childProfile.birthDate,
+        sex: childProfile.sex,
+        guardian: childProfile.guardian,
+        concerns: childProfile.concerns,
+      },
+      mchat: {
+        ...mchat,
+        // When the Follow-Up has its own (more specific) recommendation
+        // override the Stage-1 generic copy with it. The clinician needs
+        // the most current guidance to read first.
+        recomendacion: followUpRecomendacion ?? mchat.recomendacion,
+      },
+      followUp: followUp ?? undefined,
+      date: new Date().toISOString(),
+    }
+  }, [messages, childProfile])
+
+  // Index of the LAST assistant tool part that produced a risk result, so
+  // we render the download CTA only once (right under the most recent
+  // RiskMeter) instead of duplicating it after every prior result.
+  const latestRiskKey = useMemo(() => {
+    let key: string | null = null
+    for (const m of messages) {
+      for (let i = 0; i < (m.parts?.length ?? 0); i++) {
+        const p = m.parts![i]
+        if (
+          (p.type === "tool-evaluar_riesgo_mchat" ||
+            p.type === "tool-evaluar_followup_mchat") &&
+          p.state === "output-available"
+        ) {
+          key = `${m.id}:${i}`
+        }
+      }
+    }
+    return key
   }, [messages])
 
   useEffect(() => {
@@ -279,15 +375,21 @@ export function ChatPanel({
                       }
                       if (part.state === "output-available") {
                         const o = part.output
+                        const showDownload =
+                          `${m.id}:${i}` === latestRiskKey && reportData !== null
                         return (
-                          <RiskMeter
-                            key={i}
-                            score={o.score}
-                            riesgo={o.riesgo}
-                            itemsEnRiesgo={o.itemsEnRiesgo}
-                            edadMeses={o.edad_meses}
-                            recomendacion={o.recomendacion}
-                          />
+                          <div key={i} className="flex flex-col gap-3">
+                            <RiskMeter
+                              score={o.score}
+                              riesgo={o.riesgo}
+                              itemsEnRiesgo={o.itemsEnRiesgo}
+                              edadMeses={o.edad_meses}
+                              recomendacion={o.recomendacion}
+                            />
+                            {showDownload && reportData && (
+                              <DownloadReportButton data={reportData} />
+                            )}
+                          </div>
                         )
                       }
                       if (part.state === "output-error") {
@@ -353,18 +455,24 @@ export function ChatPanel({
                       }
                       if (part.state === "output-available") {
                         const o = part.output
+                        const showDownload =
+                          `${m.id}:${i}` === latestRiskKey && reportData !== null
                         return (
-                          <RiskMeter
-                            key={i}
-                            variant="followup"
-                            scoreStage1={o.score_stage1}
-                            followupScore={o.followup_score}
-                            totalItemsEvaluados={o.total_items_evaluados}
-                            resultadoFollowup={o.resultado}
-                            itemsQueFallanFollowup={o.items_que_fallan_followup}
-                            edadMeses={o.edad_meses}
-                            recomendacion={o.recomendacion}
-                          />
+                          <div key={i} className="flex flex-col gap-3">
+                            <RiskMeter
+                              variant="followup"
+                              scoreStage1={o.score_stage1}
+                              followupScore={o.followup_score}
+                              totalItemsEvaluados={o.total_items_evaluados}
+                              resultadoFollowup={o.resultado}
+                              itemsQueFallanFollowup={o.items_que_fallan_followup}
+                              edadMeses={o.edad_meses}
+                              recomendacion={o.recomendacion}
+                            />
+                            {showDownload && reportData && (
+                              <DownloadReportButton data={reportData} />
+                            )}
+                          </div>
                         )
                       }
                       if (part.state === "output-error") {
@@ -439,6 +547,54 @@ export function ChatPanel({
                       return null
                     }
 
+                    // --- TOOL: generar_informe_pediatra (client-side UI) ---
+                    if (part.type === "tool-generar_informe_pediatra") {
+                      if (
+                        part.state === "input-streaming" ||
+                        part.state === "input-available"
+                      ) {
+                        const inp = part.input as { motivo?: string } | undefined
+                        return (
+                          <AutoDownloadReport
+                            key={i}
+                            data={reportData}
+                            motivo={
+                              inp?.motivo ??
+                              "Estoy preparando un informe profesional con los resultados acumulados."
+                            }
+                            onComplete={(output) => {
+                              addToolOutput({
+                                tool: "generar_informe_pediatra",
+                                toolCallId: part.toolCallId,
+                                output,
+                              })
+                            }}
+                          />
+                        )
+                      }
+                      if (part.state === "output-available") {
+                        return (
+                          <div
+                            key={i}
+                            className="rounded-xl border border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+                          >
+                            {part.output.generado
+                              ? "Informe descargado correctamente."
+                              : "No fue posible descargar el informe en este momento."}
+                          </div>
+                        )
+                      }
+                      if (part.state === "output-error") {
+                        return (
+                          <ToolError
+                            key={i}
+                            text={part.errorText ?? "Error al generar el informe."}
+                          />
+                        )
+                      }
+                      return null
+                    }
+
                     // --- TOOL: analizar_video_conducta (server) ---
                     if (part.type === "tool-analizar_video_conducta") {
                       if (part.state === "input-available") {
@@ -453,6 +609,7 @@ export function ChatPanel({
                             duracionSeg={o.duracion_analizada_seg}
                             resultados={[...o.resultados]}
                             alertaClinica={o.alerta_clinica}
+                            calidadVideo={o.calidad_video}
                             nota={o.nota}
                           />
                         )
