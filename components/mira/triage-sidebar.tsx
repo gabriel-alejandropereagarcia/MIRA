@@ -2,13 +2,9 @@
 
 import {
   Baby,
-  BookOpen,
   CheckCircle2,
   Circle,
-  Phone,
-  FileHeart,
   MessagesSquare,
-  PlayCircle,
   ShieldCheck,
   Sparkles,
 } from "lucide-react"
@@ -17,6 +13,7 @@ import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import type { ChildProfile } from "@/lib/mira-storage"
+import { ResourceButtons } from "@/components/mira/resource-dialogs"
 
 export type TriageStep =
   | "intake"
@@ -47,29 +44,6 @@ const MILESTONES = [
   { age: "15 meses", title: "Primeras palabras", done: false },
   { age: "18 meses", title: "Juego simbólico temprano", done: false },
   { age: "24 meses", title: "Combina 2 palabras", done: false },
-]
-
-const RESOURCES = [
-  {
-    icon: Phone,
-    title: "Línea de orientación",
-    desc: "Habla con un especialista",
-  },
-  {
-    icon: FileHeart,
-    title: "Derivación profesional",
-    desc: "Directorio de neuropediatras",
-  },
-  {
-    icon: PlayCircle,
-    title: "Videos Denver",
-    desc: "Rutinas guiadas para casa",
-  },
-  {
-    icon: BookOpen,
-    title: "Guía para padres",
-    desc: "Qué esperar paso a paso",
-  },
 ]
 
 function stepDone(state: TriageState, key: TriageStep): boolean {
@@ -263,26 +237,7 @@ export function TriageSidebar({
             Recursos rápidos
           </h2>
         </header>
-        <div className="grid grid-cols-2 gap-2">
-          {RESOURCES.map((r) => {
-            const Icon = r.icon
-            return (
-              <button
-                key={r.title}
-                type="button"
-                className="flex flex-col gap-1 rounded-lg border border-border/60 bg-card p-2.5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5"
-              >
-                <Icon className="size-4 text-primary" />
-                <span className="text-[12px] font-medium leading-tight">
-                  {r.title}
-                </span>
-                <span className="text-[11px] leading-snug text-muted-foreground">
-                  {r.desc}
-                </span>
-              </button>
-            )
-          })}
-        </div>
+        <ResourceButtons />
       </section>
 
       <footer className="mt-auto rounded-lg bg-secondary/60 p-3 text-[11px] leading-relaxed text-secondary-foreground">

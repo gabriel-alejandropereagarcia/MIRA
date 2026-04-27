@@ -19,6 +19,7 @@ import { VideoAnalysisCard } from "@/components/generative/video-analysis-card"
 import { MchatQuestionnaire } from "@/components/generative/mchat-questionnaire"
 import type { TriageState } from "@/components/mira/triage-sidebar"
 import { MessageText } from "@/components/mira/message-text"
+import { ThemeToggle } from "@/components/mira/theme-toggle"
 import type { ChildProfile } from "@/lib/mira-storage"
 
 type Props = {
@@ -158,13 +159,16 @@ export function ChatPanel({
             </div>
           </div>
         </div>
-        <Badge
-          variant="outline"
-          className="hidden gap-1.5 border-primary/30 bg-primary/5 text-primary sm:flex"
-        >
-          <Heart className="size-3 fill-primary/30" />
-          Cribado, no diagnóstico
-        </Badge>
+        <div className="flex items-center gap-2">
+          <Badge
+            variant="outline"
+            className="hidden gap-1.5 border-primary/30 bg-primary/5 text-primary sm:flex"
+          >
+            <Heart className="size-3 fill-primary/30" />
+            Cribado, no diagnóstico
+          </Badge>
+          <ThemeToggle />
+        </div>
       </header>
 
       {/* Messages */}
