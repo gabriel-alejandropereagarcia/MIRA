@@ -1,6 +1,8 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
 import {
+  AlertTriangle,
   Baby,
   CheckCircle2,
   Circle,
@@ -11,8 +13,17 @@ import {
 import { motion } from "framer-motion"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Progress } from "@/components/ui/progress"
 import type { ChildProfile } from "@/lib/mira-storage"
+import {
+  getMilestoneBucket,
+  getMilestonesForAge,
+  getObservedMilestones,
+  setObservedMilestones,
+  type Milestone,
+  type MilestoneCategory,
+} from "@/lib/milestones-data"
 import { ResourceButtons } from "@/components/mira/resource-dialogs"
 
 export type TriageStep =
@@ -38,13 +49,15 @@ const STEP_ORDER: { key: TriageStep; label: string; hint: string }[] = [
   { key: "video", label: "Análisis de video", hint: "Marcadores conductuales" },
 ]
 
-const MILESTONES = [
-  { age: "9 meses", title: "Balbuceo con entonación", done: true },
-  { age: "12 meses", title: "Señala para pedir", done: true },
-  { age: "15 meses", title: "Primeras palabras", done: false },
-  { age: "18 meses", title: "Juego simbólico temprano", done: false },
-  { age: "24 meses", title: "Combina 2 palabras", done: false },
-]
+const CATEGORY_META: Record<
+  MilestoneCategory,
+  { emoji: string; label: string }
+> = {
+  social: { emoji: "🤝", label: "Social" },
+  language: { emoji: "🗣️", label: "Lenguaje" },
+  cognitive: { emoji: "🧠", label: "Cognitivo" },
+  motor: { emoji: "🏃", label: "Motor" },
+}
 
 function stepDone(state: TriageState, key: TriageStep): boolean {
   switch (key) {
@@ -195,39 +208,7 @@ export function TriageSidebar({
       </section>
 
       {/* Milestones */}
-      <section aria-label="Hitos del desarrollo" className="space-y-3">
-        <header className="flex items-center gap-2">
-          <Baby className="size-4 text-primary" />
-          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            Hitos del desarrollo
-          </h2>
-        </header>
-        <ul className="space-y-1.5">
-          {MILESTONES.map((m) => (
-            <li
-              key={m.age}
-              className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-muted/60"
-            >
-              <span
-                className={cn(
-                  "flex size-5 shrink-0 items-center justify-center rounded-full",
-                  m.done
-                    ? "bg-[color:var(--risk-low)]/20 text-[color:var(--risk-low)]"
-                    : "bg-muted text-muted-foreground",
-                )}
-              >
-                {m.done ? (
-                  <CheckCircle2 className="size-3.5" />
-                ) : (
-                  <Circle className="size-3" />
-                )}
-              </span>
-              <span className="flex-1 text-foreground/90">{m.title}</span>
-              <span className="text-[11px] text-muted-foreground">{m.age}</span>
-            </li>
-          ))}
-        </ul>
-      </section>
+      <MilestonesSection childProfile={childProfile} />
 
       {/* Quick resources */}
       <section aria-label="Recursos rápidos" className="space-y-3">
@@ -251,5 +232,184 @@ export function TriageSidebar({
         </p>
       </footer>
     </aside>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Milestones section                                                        */
+/* -------------------------------------------------------------------------- */
+
+function MilestonesSection({
+  childProfile,
+}: {
+  childProfile?: ChildProfile
+}) {
+  const ageMonths = childProfile?.ageMonths ?? 0
+  const childId = childProfile?.id ?? ""
+
+  const milestones = useMemo(() => getMilestonesForAge(ageMonths), [ageMonths])
+  const bucket = useMemo(() => getMilestoneBucket(ageMonths), [ageMonths])
+
+  // Hydrate observed-state from localStorage AFTER mount to avoid an SSR
+  // mismatch on the first paint.
+  const [observed, setObserved] = useState<Set<string>>(() => new Set())
+  useEffect(() => {
+    if (!childId) return
+    setObserved(new Set(getObservedMilestones(childId)))
+  }, [childId])
+
+  function toggle(id: string, next: boolean) {
+    setObserved((prev) => {
+      const updated = new Set(prev)
+      if (next) updated.add(id)
+      else updated.delete(id)
+      if (childId) setObservedMilestones(childId, [...updated])
+      return updated
+    })
+  }
+
+  // Group milestones by category for cleaner UI scanning.
+  const grouped = useMemo(() => {
+    const buckets: Record<MilestoneCategory, Milestone[]> = {
+      social: [],
+      language: [],
+      cognitive: [],
+      motor: [],
+    }
+    for (const m of milestones) buckets[m.category].push(m)
+    return buckets
+  }, [milestones])
+
+  // No bucket yet (under 9 months) — show a soft placeholder.
+  if (milestones.length === 0) {
+    return (
+      <section aria-label="Hitos del desarrollo" className="space-y-3">
+        <header className="flex items-center gap-2">
+          <Baby className="size-4 text-primary" />
+          <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Hitos del desarrollo
+          </h2>
+        </header>
+        <p className="rounded-lg border border-dashed border-border/60 bg-muted/40 p-3 text-[12px] leading-relaxed text-muted-foreground">
+          Los hitos MIRA se monitorean a partir de los 9 meses. Volveremos a
+          mostrarlos cuando {childProfile?.alias ?? "tu hijo/a"} cumpla esa
+          edad.
+        </p>
+      </section>
+    )
+  }
+
+  const observedCount = milestones.filter((m) => observed.has(m.id)).length
+  const redFlagsPending = milestones.filter(
+    (m) => m.isRedFlag && !observed.has(m.id),
+  ).length
+
+  return (
+    <section aria-label="Hitos del desarrollo" className="space-y-3">
+      <header className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <Baby className="size-4 shrink-0 text-primary" />
+          <h2 className="truncate text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Hitos del desarrollo
+          </h2>
+        </div>
+        <Badge variant="outline" className="border-border/60 text-[10px]">
+          CDC · {bucket}m
+        </Badge>
+      </header>
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Marca los que ya hayas observado en{" "}
+        <strong className="text-foreground">
+          {childProfile?.alias ?? "tu hijo/a"}
+        </strong>
+        . {observedCount} de {milestones.length} marcados.
+      </p>
+
+      {redFlagsPending > 0 && (
+        <div className="flex items-start gap-2 rounded-lg border border-[color:var(--risk-medium)]/30 bg-[color:var(--risk-medium)]/10 px-2.5 py-2 text-[11px] leading-relaxed text-foreground/90">
+          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-[color:var(--risk-medium)]" />
+          <p>
+            {redFlagsPending} hito
+            {redFlagsPending === 1 ? "" : "s"} de alarma sin observar. Comenta
+            esto con MIRA o tu pediatra.
+          </p>
+        </div>
+      )}
+
+      <div className="space-y-3">
+        {(Object.keys(CATEGORY_META) as MilestoneCategory[]).map((cat) => {
+          const items = grouped[cat]
+          if (items.length === 0) return null
+          const meta = CATEGORY_META[cat]
+          return (
+            <div key={cat} className="space-y-1.5">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold text-foreground/80">
+                <span aria-hidden="true">{meta.emoji}</span>
+                {meta.label}
+              </p>
+              <ul className="space-y-1">
+                {items.map((m) => {
+                  const isChecked = observed.has(m.id)
+                  const isAlertable = m.isRedFlag && !isChecked
+                  return (
+                    <li key={m.id}>
+                      <label
+                        htmlFor={`ms-${m.id}`}
+                        className={cn(
+                          "flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 text-[12.5px] leading-snug transition-colors hover:bg-muted/60",
+                          isAlertable &&
+                            "bg-[color:var(--risk-medium)]/5 hover:bg-[color:var(--risk-medium)]/10",
+                        )}
+                      >
+                        <Checkbox
+                          id={`ms-${m.id}`}
+                          checked={isChecked}
+                          onCheckedChange={(next) =>
+                            toggle(m.id, next === true)
+                          }
+                          aria-describedby={
+                            m.isRedFlag ? `ms-${m.id}-flag` : undefined
+                          }
+                          className="mt-0.5"
+                        />
+                        <span className="min-w-0 flex-1">
+                          <span
+                            className={cn(
+                              isChecked
+                                ? "text-foreground/70 line-through decoration-foreground/30"
+                                : "text-foreground/90",
+                            )}
+                          >
+                            {m.description_es}
+                          </span>
+                          {isAlertable && (
+                            <span
+                              id={`ms-${m.id}-flag`}
+                              className="ml-1.5 inline-flex items-center align-middle"
+                            >
+                              <AlertTriangle
+                                className="size-3 text-[color:var(--risk-medium)]"
+                                aria-label="Señal de alarma si no se observa"
+                              />
+                            </span>
+                          )}
+                        </span>
+                        {isChecked && (
+                          <CheckCircle2
+                            className="mt-0.5 size-3.5 shrink-0 text-[color:var(--risk-low)]"
+                            aria-hidden="true"
+                          />
+                        )}
+                      </label>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }
