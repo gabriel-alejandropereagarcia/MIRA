@@ -20,6 +20,76 @@ import { Download, FileText, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { ReportData } from "@/components/mira/report-document"
 
+/**
+ * Map the clinical signals already living in `ReportData` to the
+ * four-bucket risk taxonomy consumed by the durable follow-up workflow.
+ *
+ *  - ALTO        → M-CHAT alto, OR M-CHAT medio + Follow-Up positivo.
+ *  - MEDIO       → M-CHAT medio (Follow-Up negativo or absent).
+ *  - BAJO_DUDAS  → M-CHAT bajo BUT caregiver reported concerns or there
+ *                  are unchecked CDC red-flag milestones (the same
+ *                  triangulation rule MIRA enforces in the chat).
+ *  - BAJO        → M-CHAT bajo, no concerns, no pending red flags.
+ */
+type DurableRiskLevel = "ALTO" | "MEDIO" | "BAJO_DUDAS" | "BAJO"
+
+function deriveDurableRiskLevel(data: ReportData): DurableRiskLevel {
+  const riesgo = data.mchat.riesgo
+  const followUpPositive = data.followUp?.resultado === "positivo"
+
+  if (riesgo === "alto" || (riesgo === "medio" && followUpPositive)) {
+    return "ALTO"
+  }
+  if (riesgo === "medio") {
+    return "MEDIO"
+  }
+  // riesgo === "bajo": triangulate before discharging.
+  const hasConcerns = data.child.concerns.length > 0
+  const hasPendingRedFlags =
+    (data.developmentalContext?.redFlagMilestonesUnchecked.length ?? 0) > 0
+  return hasConcerns || hasPendingRedFlags ? "BAJO_DUDAS" : "BAJO"
+}
+
+/**
+ * Fire-and-forget helper that schedules the durable follow-up. Errors
+ * are swallowed by design — the workflow trigger is best-effort and
+ * must NEVER interrupt the caregiver's PDF download experience.
+ */
+async function scheduleDurableFollowUp(data: ReportData): Promise<void> {
+  try {
+    const riskLevel = deriveDurableRiskLevel(data)
+    const res = await fetch("/api/workflows/followup", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: "", // not collected in this MVP; workflow handles empty
+        childName: data.child.alias ?? "",
+        riskLevel,
+      }),
+    })
+    if (!res.ok) {
+      console.log(
+        "[v0] follow-up workflow trigger non-2xx:",
+        res.status,
+      )
+      return
+    }
+    const json = (await res.json()) as { runId?: string }
+    if (json.runId) {
+      console.log(
+        "[v0] Durable follow-up scheduled runId=%s riskLevel=%s",
+        json.runId,
+        riskLevel,
+      )
+    }
+  } catch (err) {
+    console.log(
+      "[v0] Failed to schedule durable follow-up:",
+      (err as Error).message,
+    )
+  }
+}
+
 /* ------------------------------------------------------------------------ */
 /*  Shared download routine                                                 */
 /* ------------------------------------------------------------------------ */
@@ -70,6 +140,11 @@ export function DownloadReportButton({ data, className }: ButtonProps) {
     setError(null)
     try {
       await generateAndDownload(data)
+      // Fire-and-forget: launch the durable follow-up workflow once
+      // the caregiver actually has the PDF in hand. Awaiting on a
+      // detached promise is intentional — failures are logged but
+      // never bubble up to the UI.
+      void scheduleDurableFollowUp(data)
     } catch (err) {
       console.log("[v0] PDF generation failed:", (err as Error).message)
       setError("No se pudo generar el PDF. Intenta nuevamente.")
@@ -167,6 +242,9 @@ export function AutoDownloadReport({ data, motivo, onComplete }: AutoProps) {
         if (cancelled) return
         setPhase("done")
         onComplete({ generado: true })
+        // Schedule the durable re-evaluation reminder. Best-effort,
+        // never blocks UI feedback to the caregiver.
+        void scheduleDurableFollowUp(data)
       } catch (err) {
         if (cancelled) return
         console.log("[v0] auto PDF generation failed:", (err as Error).message)
