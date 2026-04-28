@@ -12,6 +12,7 @@ import {
   Languages,
   Lightbulb,
   Loader2,
+  Lock,
   ShieldCheck,
   Smile,
   Upload,
@@ -20,7 +21,6 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 
 type Marcador =
@@ -98,15 +98,21 @@ export function VideoUploader({
   const [acknowledged, setAcknowledged] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  const [selected, setSelected] = useState<Set<Marcador>>(
-    new Set(marcadoresSugeridos),
-  )
   const [phase, setPhase] = useState<Phase>("idle")
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const isBusy = phase === "uploading" || phase === "analyzing"
   const lockUI = isBusy || disabled
+
+  /**
+   * Markers to analyze are a CLINICAL DECISION made by MIRA based on the
+   * caregiver's intake, M-CHAT triage, and conversational context. The
+   * caregiver MUST NOT be able to add, remove, or override them — doing
+   * so would compromise the objectivity of the screening. We dedupe the
+   * incoming list and freeze it for the lifetime of this card.
+   */
+  const markersToAnalyze: Marcador[] = Array.from(new Set(marcadoresSugeridos))
 
   function handleFile(f: File | null) {
     if (!f) return
@@ -122,16 +128,6 @@ export function VideoUploader({
     }
     setError(null)
     setFile(f)
-  }
-
-  function toggleMarker(m: Marcador) {
-    if (lockUI) return
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(m)) next.delete(m)
-      else next.add(m)
-      return next
-    })
   }
 
   function reset() {
@@ -152,7 +148,7 @@ export function VideoUploader({
    *      then summarises results — no second tool call needed.
    */
   async function submit() {
-    if (!file || selected.size === 0 || isBusy) return
+    if (!file || markersToAnalyze.length === 0 || isBusy) return
     setError(null)
     setPhase("uploading")
 
@@ -175,16 +171,16 @@ export function VideoUploader({
         mimeType: string
       }
 
-      // Step 2 — Analyze with Gemini Vision (via server)
+      // Step 2 — Analyze with Gemini Vision (via server). Markers are
+      // the clinical selection MIRA passed in — never user-modified.
       setPhase("analyzing")
-      const markers = Array.from(selected)
       const analyzeRes = await fetch("/api/analyze-video", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           video_uri: upload.fileUri,
           mime_type: upload.mimeType,
-          marcadores: markers,
+          marcadores: markersToAnalyze,
         }),
       })
       if (!analyzeRes.ok) {
@@ -463,60 +459,56 @@ export function VideoUploader({
           )}
         </div>
 
-        {/* Marcadores — explicit checkboxes */}
-        <fieldset className="space-y-2" disabled={lockUI}>
-          <legend className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
-            <Brain className="size-3.5 text-primary" />
-            Selecciona qué marcadores quieres que la IA analice
-          </legend>
-          <p className="-mt-1 mb-2 text-[11px] text-muted-foreground">
-            Pre-seleccionamos los más relevantes según el contexto. Marca o
-            desmarca según quieras enfocar el análisis.
+        {/* Marcadores — clinical decision, READ-ONLY. The caregiver sees
+            transparently what MIRA will analyze, but cannot tamper with
+            the selection (would compromise the objectivity of the screening). */}
+        <section
+          aria-labelledby="markers-heading"
+          className="rounded-xl border border-border/60 bg-muted/30 p-3"
+        >
+          <header className="mb-2 flex items-center justify-between gap-2">
+            <h3
+              id="markers-heading"
+              className="flex items-center gap-1.5 text-xs font-semibold text-foreground"
+            >
+              <Brain className="size-3.5 text-primary" />
+              Marcadores que MIRA va a analizar
+            </h3>
+            <Badge
+              variant="outline"
+              className="border-primary/40 bg-primary/5 text-[10px] font-medium uppercase tracking-wide text-primary"
+            >
+              <Lock className="mr-1 size-3" />
+              Decisión clínica
+            </Badge>
+          </header>
+          <p className="mb-2.5 text-[11.5px] leading-relaxed text-muted-foreground">
+            MIRA seleccionó estos marcadores en base a tu conversación y al
+            cribado realizado. La elección es clínica y no es modificable —
+            así garantizamos la objetividad del análisis.
           </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            {(Object.keys(MARCADOR_LABEL) as Marcador[]).map((m) => {
-              const active = selected.has(m)
+          <ul className="space-y-1.5">
+            {markersToAnalyze.map((m) => {
               const meta = MARCADOR_LABEL[m]
               return (
-                <label
+                <li
                   key={m}
-                  htmlFor={`marker-${m}`}
-                  className={cn(
-                    "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors",
-                    active
-                      ? "border-primary/60 bg-primary/5"
-                      : "border-border bg-background hover:bg-muted/60",
-                    lockUI && "cursor-not-allowed opacity-60",
-                  )}
+                  className="flex items-start gap-2.5 rounded-lg border border-primary/30 bg-background px-3 py-2"
                 >
-                  <Checkbox
-                    id={`marker-${m}`}
-                    checked={active}
-                    onCheckedChange={() => toggleMarker(m)}
-                    className="mt-0.5"
-                    aria-describedby={`marker-${m}-hint`}
-                  />
+                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-primary" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[13px] font-medium leading-tight text-foreground">
                       {meta.title}
                     </p>
-                    <p
-                      id={`marker-${m}-hint`}
-                      className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground"
-                    >
+                    <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">
                       {meta.hint}
                     </p>
                   </div>
-                </label>
+                </li>
               )
             })}
-          </div>
-          {selected.size === 0 && (
-            <p className="pt-1 text-[11.5px] text-amber-600 dark:text-amber-400">
-              Selecciona al menos un marcador para continuar.
-            </p>
-          )}
-        </fieldset>
+          </ul>
+        </section>
 
         {/* Status feedback */}
         {phase === "uploading" && (
@@ -560,13 +552,13 @@ export function VideoUploader({
             <Button
               type="button"
               onClick={submit}
-              disabled={!file || selected.size === 0 || lockUI}
+              disabled={!file || markersToAnalyze.length === 0 || lockUI}
             >
               {phase === "uploading"
                 ? "Subiendo…"
                 : phase === "analyzing"
                   ? "Analizando…"
-                  : `Analizar video (${selected.size})`}
+                  : "Enviar para análisis"}
             </Button>
           </div>
         </div>
