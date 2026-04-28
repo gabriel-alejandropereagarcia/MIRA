@@ -4,6 +4,7 @@ import { useRef, useState } from "react"
 import { motion } from "framer-motion"
 import {
   AlertTriangle,
+  Brain,
   CheckCircle2,
   Clock,
   Eye,
@@ -19,6 +20,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
 import { cn } from "@/lib/utils"
 
 type Marcador =
@@ -27,46 +29,63 @@ type Marcador =
   | "aleteo_manos"
   | "senalamiento"
 
-const MARCADOR_LABEL: Record<Marcador, string> = {
-  contacto_visual: "Contacto visual",
-  respuesta_nombre: "Respuesta al nombre",
-  aleteo_manos: "Aleteo de manos",
-  senalamiento: "Señalamiento",
+const MARCADOR_LABEL: Record<Marcador, { title: string; hint: string }> = {
+  contacto_visual: {
+    title: "Contacto visual",
+    hint: "¿Mira a los ojos durante el juego o cuando le hablan?",
+  },
+  respuesta_nombre: {
+    title: "Respuesta al nombre",
+    hint: "¿Gira la cabeza o reacciona cuando lo llaman por su nombre?",
+  },
+  aleteo_manos: {
+    title: "Movimientos repetitivos",
+    hint: "¿Aleteo de manos, balanceo o movimientos estereotipados?",
+  },
+  senalamiento: {
+    title: "Señalamiento con el dedo",
+    hint: "¿Apunta con el índice para pedir, mostrar o compartir interés?",
+  },
 }
 
-/** UI phases for the upload pipeline. */
-type Phase = "idle" | "uploading" | "processing" | "ready" | "error"
+/**
+ * Phases of the unified upload + analyze pipeline. The component owns
+ * the entire chain so the model never has to make a second tool call —
+ * we hand it the final analysis directly.
+ */
+type Phase =
+  | "idle"
+  | "uploading" // POST /api/upload-video
+  | "analyzing" // POST /api/analyze-video
+  | "ready"
+  | "error"
 
 const MAX_BYTES = 50 * 1024 * 1024
 const RECOMMENDED_MIN_SECONDS = 30
 const RECOMMENDED_MAX_SECONDS = 60
 
+export type VideoMarkerResult = {
+  marcador: string
+  presencia: "presente" | "inconsistente" | "ausente" | "no_evaluable"
+  confianza: number
+  observacion: string
+}
+
 type Props = {
   motivo: string
   marcadoresSugeridos: Marcador[]
   onSubmit: (result: {
-    video_uri: string
-    mime_type: string
-    marcadores: Marcador[]
     cancelado: boolean
+    video_uri: string
+    duracion_analizada_seg: number
+    calidad_video: "buena" | "aceptable" | "baja"
+    alerta_clinica: boolean
+    resultados: VideoMarkerResult[]
+    nota: string
   }) => void
   disabled?: boolean
 }
 
-/**
- * Two-step upload UX.
- *
- * Step 1 (`stage === "guide"`) — a calm pre-recording briefing that
- * spells out exactly WHAT to record, HOW long, and WHAT NOT to record.
- * The caregiver must explicitly acknowledge the privacy + consent
- * checklist before they can move on. This is critical for the video to
- * be useful as an "objective referee" in the triangulation flow: a
- * well-framed clip of natural play yields signal; a directed,
- * over-rehearsed clip yields noise.
- *
- * Step 2 (`stage === "upload"`) — the actual file picker, marker
- * selection, and submit. Identical to the previous version's flow.
- */
 type Stage = "guide" | "upload"
 
 export function VideoUploader({
@@ -79,12 +98,14 @@ export function VideoUploader({
   const [acknowledged, setAcknowledged] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const [dragOver, setDragOver] = useState(false)
-  const [selected, setSelected] = useState<Marcador[]>(marcadoresSugeridos)
+  const [selected, setSelected] = useState<Set<Marcador>>(
+    new Set(marcadoresSugeridos),
+  )
   const [phase, setPhase] = useState<Phase>("idle")
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const isBusy = phase === "uploading" || phase === "processing"
+  const isBusy = phase === "uploading" || phase === "analyzing"
   const lockUI = isBusy || disabled
 
   function handleFile(f: File | null) {
@@ -94,7 +115,9 @@ export function VideoUploader({
       return
     }
     if (f.size > MAX_BYTES) {
-      setError("Ese video supera los 50 MB. Recorta o comprime e intenta de nuevo.")
+      setError(
+        "Ese video supera los 50 MB. Recorta o comprime e intenta de nuevo.",
+      )
       return
     }
     setError(null)
@@ -103,9 +126,12 @@ export function VideoUploader({
 
   function toggleMarker(m: Marcador) {
     if (lockUI) return
-    setSelected((s) =>
-      s.includes(m) ? s.filter((x) => x !== m) : [...s, m],
-    )
+    setSelected((prev) => {
+      const next = new Set(prev)
+      if (next.has(m)) next.delete(m)
+      else next.add(m)
+      return next
+    })
   }
 
   function reset() {
@@ -116,59 +142,95 @@ export function VideoUploader({
     if (inputRef.current) inputRef.current.value = ""
   }
 
+  /**
+   * Runs the full pipeline:
+   *   1. POST file to /api/upload-video, wait for the Gemini File API
+   *      to mark it ACTIVE. Returns { fileUri, mimeType }.
+   *   2. POST { video_uri, mime_type, marcadores } to /api/analyze-video,
+   *      get back the structured analysis.
+   *   3. Resolve the AI tool call with the COMPLETE analysis. The model
+   *      then summarises results — no second tool call needed.
+   */
   async function submit() {
-    if (!file || selected.length === 0 || isBusy) return
+    if (!file || selected.size === 0 || isBusy) return
     setError(null)
     setPhase("uploading")
 
-    const formData = new FormData()
-    formData.append("video", file)
-
     try {
-      const inflight = fetch("/api/upload-video", {
+      // Step 1 — Upload to Gemini File API (via server)
+      const uploadForm = new FormData()
+      uploadForm.append("video", file)
+      const uploadRes = await fetch("/api/upload-video", {
         method: "POST",
-        body: formData,
+        body: uploadForm,
       })
-      const phaseTimer = setTimeout(() => setPhase("processing"), 600)
-      const res = await inflight
-      clearTimeout(phaseTimer)
-
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as
+      if (!uploadRes.ok) {
+        const body = (await uploadRes.json().catch(() => null)) as
           | { error?: string }
           | null
-        throw new Error(body?.error || "No se pudo procesar el video.")
+        throw new Error(body?.error || "No se pudo subir el video.")
       }
-
-      const data = (await res.json()) as {
+      const upload = (await uploadRes.json()) as {
         fileUri: string
         mimeType: string
-        name: string
       }
 
+      // Step 2 — Analyze with Gemini Vision (via server)
+      setPhase("analyzing")
+      const markers = Array.from(selected)
+      const analyzeRes = await fetch("/api/analyze-video", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          video_uri: upload.fileUri,
+          mime_type: upload.mimeType,
+          marcadores: markers,
+        }),
+      })
+      if (!analyzeRes.ok) {
+        const body = (await analyzeRes.json().catch(() => null)) as
+          | { error?: string }
+          | null
+        throw new Error(body?.error || "No se pudo analizar el video.")
+      }
+      const analysis = (await analyzeRes.json()) as {
+        duracion_analizada_seg: number
+        calidad_video: "buena" | "aceptable" | "baja"
+        alerta_clinica: boolean
+        resultados: VideoMarkerResult[]
+        nota: string
+      }
+
+      // Step 3 — Hand the model a complete result. No further tool calls.
       setPhase("ready")
       onSubmit({
-        video_uri: data.fileUri,
-        mime_type: data.mimeType,
-        marcadores: selected,
         cancelado: false,
+        video_uri: upload.fileUri,
+        duracion_analizada_seg: analysis.duracion_analizada_seg,
+        calidad_video: analysis.calidad_video,
+        alerta_clinica: analysis.alerta_clinica,
+        resultados: analysis.resultados,
+        nota: analysis.nota,
       })
     } catch (err) {
-      console.log("[v0] video upload failed:", (err as Error).message)
+      console.log("[v0] video pipeline failed:", (err as Error).message)
       setPhase("error")
       setError(
         (err as Error).message ||
-          "No se pudo subir el video. Revisa tu conexión e intenta de nuevo.",
+          "Ocurrió un error procesando el video. Intenta nuevamente.",
       )
     }
   }
 
   function cancelAll() {
     onSubmit({
-      video_uri: "",
-      mime_type: "",
-      marcadores: [],
       cancelado: true,
+      video_uri: "",
+      duracion_analizada_seg: 0,
+      calidad_video: "aceptable",
+      alerta_clinica: false,
+      resultados: [],
+      nota: "",
     })
   }
 
@@ -191,9 +253,9 @@ export function VideoUploader({
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-[13px] leading-relaxed text-foreground/85">
-            Para que el análisis sea útil necesitamos que el video capture al
-            niño/a en una situación natural. Cuanto menos pongamos en escena,
-            más confiable será el resultado.
+            Para que el análisis sea útil necesitamos un video del niño/a en
+            una situación natural. Cuanto menos pongamos en escena, más
+            confiable será el resultado.
           </p>
 
           <section className="space-y-2.5">
@@ -224,17 +286,17 @@ export function VideoUploader({
             <GuideRow
               icon={<Clock className="size-4" />}
               title={`Duración: ${RECOMMENDED_MIN_SECONDS}–${RECOMMENDED_MAX_SECONDS} segundos`}
-              body="Con un minuto suele bastar. Si grabas más de 90 segundos el análisis pierde foco."
+              body="Con un minuto suele bastar. Más de 90 segundos rara vez añade información."
             />
             <GuideRow
               icon={<Lightbulb className="size-4" />}
               title="Buena luz y cámara estable"
-              body="Luz natural si es posible, niño/a centrado en el cuadro. Evita contraluz y movimientos bruscos de cámara — apoya el teléfono o usa modo horizontal."
+              body="Luz natural si es posible, niño/a centrado en el cuadro. Evita contraluz y movimientos bruscos — apoya el teléfono o usa modo horizontal."
             />
             <GuideRow
               icon={<ShieldCheck className="size-4" />}
               title="Sin baño, ni cambio de pañal, ni desnudez"
-              body="Por respeto al niño/a y por privacidad, evita esas situaciones. Si sales en la grabación, asegúrate de que estás cómodo/a con que un profesional lo vea."
+              body="Por respeto al niño/a y por privacidad, evita esas situaciones. Si sales en la grabación, asegúrate de estar cómodo/a con que un profesional lo vea."
             />
           </section>
 
@@ -304,7 +366,7 @@ export function VideoUploader({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* Recap pill */}
+        {/* Recap pill back to instructions */}
         <button
           type="button"
           onClick={() => !lockUI && setStage("guide")}
@@ -401,23 +463,78 @@ export function VideoUploader({
           )}
         </div>
 
-        {/* Status feedback (loading / error) */}
+        {/* Marcadores — explicit checkboxes */}
+        <fieldset className="space-y-2" disabled={lockUI}>
+          <legend className="mb-2 flex items-center gap-1.5 text-xs font-medium text-foreground">
+            <Brain className="size-3.5 text-primary" />
+            Selecciona qué marcadores quieres que la IA analice
+          </legend>
+          <p className="-mt-1 mb-2 text-[11px] text-muted-foreground">
+            Pre-seleccionamos los más relevantes según el contexto. Marca o
+            desmarca según quieras enfocar el análisis.
+          </p>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {(Object.keys(MARCADOR_LABEL) as Marcador[]).map((m) => {
+              const active = selected.has(m)
+              const meta = MARCADOR_LABEL[m]
+              return (
+                <label
+                  key={m}
+                  htmlFor={`marker-${m}`}
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2 transition-colors",
+                    active
+                      ? "border-primary/60 bg-primary/5"
+                      : "border-border bg-background hover:bg-muted/60",
+                    lockUI && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  <Checkbox
+                    id={`marker-${m}`}
+                    checked={active}
+                    onCheckedChange={() => toggleMarker(m)}
+                    className="mt-0.5"
+                    aria-describedby={`marker-${m}-hint`}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium leading-tight text-foreground">
+                      {meta.title}
+                    </p>
+                    <p
+                      id={`marker-${m}-hint`}
+                      className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground"
+                    >
+                      {meta.hint}
+                    </p>
+                  </div>
+                </label>
+              )
+            })}
+          </div>
+          {selected.size === 0 && (
+            <p className="pt-1 text-[11.5px] text-amber-600 dark:text-amber-400">
+              Selecciona al menos un marcador para continuar.
+            </p>
+          )}
+        </fieldset>
+
+        {/* Status feedback */}
         {phase === "uploading" && (
           <StatusRow tone="info">
             <Loader2 className="size-4 animate-spin" />
-            Subiendo video…
+            Subiendo video al servidor seguro…
           </StatusRow>
         )}
-        {phase === "processing" && (
+        {phase === "analyzing" && (
           <StatusRow tone="info">
             <Loader2 className="size-4 animate-spin" />
-            Procesando con Gemini…
+            Analizando con Gemini Vision (esto puede tardar 30–60 s)…
           </StatusRow>
         )}
         {phase === "ready" && (
           <StatusRow tone="success">
             <CheckCircle2 className="size-4" />
-            Listo. Iniciando análisis…
+            Análisis completado.
           </StatusRow>
         )}
         {phase === "error" && error && (
@@ -426,36 +543,6 @@ export function VideoUploader({
             {error}
           </StatusRow>
         )}
-
-        {/* Marcadores */}
-        <div>
-          <p className="mb-2 text-xs font-medium text-muted-foreground">
-            Marcadores a analizar
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {(Object.keys(MARCADOR_LABEL) as Marcador[]).map((m) => {
-              const active = selected.includes(m)
-              return (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => toggleMarker(m)}
-                  disabled={lockUI}
-                  className={cn(
-                    "rounded-full border px-3 py-1 text-xs transition-colors",
-                    active
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted",
-                    lockUI && "cursor-not-allowed opacity-60 hover:bg-background",
-                  )}
-                  aria-pressed={active}
-                >
-                  {MARCADOR_LABEL[m]}
-                </button>
-              )
-            })}
-          </div>
-        </div>
 
         <div className="flex items-center justify-between gap-2 pt-1">
           <Badge variant="outline" className="text-[11px]">
@@ -473,13 +560,13 @@ export function VideoUploader({
             <Button
               type="button"
               onClick={submit}
-              disabled={!file || selected.length === 0 || lockUI}
+              disabled={!file || selected.size === 0 || lockUI}
             >
               {phase === "uploading"
                 ? "Subiendo…"
-                : phase === "processing"
-                  ? "Procesando…"
-                  : "Enviar para análisis"}
+                : phase === "analyzing"
+                  ? "Analizando…"
+                  : `Analizar video (${selected.size})`}
             </Button>
           </div>
         </div>
@@ -529,8 +616,7 @@ function StatusRow({
       aria-live="polite"
       className={cn(
         "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium",
-        tone === "info" &&
-          "border-primary/30 bg-primary/5 text-primary",
+        tone === "info" && "border-primary/30 bg-primary/5 text-primary",
         tone === "success" &&
           "border-[color:var(--risk-low)]/30 bg-[color:var(--risk-low)]/10 text-[color:var(--risk-low)]",
         tone === "error" &&

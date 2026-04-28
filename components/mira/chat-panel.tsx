@@ -160,8 +160,9 @@ export function ChatPanel({
         if (p.type === "tool-sugerir_ejercicios_denver" && p.state === "output-available") {
           state.denver = true
         }
-        if (p.type === "tool-analizar_video_conducta" && p.state === "output-available") {
-          state.video = true
+        if (p.type === "tool-analizar_video" && p.state === "output-available") {
+          // Only count completed (non-cancelled) analyses for triage progress.
+          if (!p.output.cancelado) state.video = true
         }
       }
     }
@@ -217,8 +218,9 @@ export function ChatPanel({
           followUpRecomendacion = o.recomendacion
         }
         if (
-          p.type === "tool-analizar_video_conducta" &&
-          p.state === "output-available"
+          p.type === "tool-analizar_video" &&
+          p.state === "output-available" &&
+          !p.output.cancelado
         ) {
           const o = p.output
           videoAnalysis = {
@@ -582,25 +584,36 @@ export function ChatPanel({
                       return null
                     }
 
-                    // --- TOOL: solicitar_video (client-side UI) ---
-                    if (part.type === "tool-solicitar_video") {
-                      if (part.state === "input-streaming" || part.state === "input-available") {
+                    // --- TOOL: analizar_video (client-side UI + compute) ---
+                    if (part.type === "tool-analizar_video") {
+                      if (
+                        part.state === "input-streaming" ||
+                        part.state === "input-available"
+                      ) {
                         const inp = part.input as
                           | {
                               motivo?: string
                               marcadores_sugeridos?: Array<
-                                "contacto_visual" | "respuesta_nombre" | "aleteo_manos" | "senalamiento"
+                                | "contacto_visual"
+                                | "respuesta_nombre"
+                                | "aleteo_manos"
+                                | "senalamiento"
                               >
                             }
                           | undefined
                         return (
                           <VideoUploader
                             key={i}
-                            motivo={inp?.motivo ?? "Analizar el comportamiento en contexto real."}
-                            marcadoresSugeridos={inp?.marcadores_sugeridos ?? ["contacto_visual"]}
+                            motivo={
+                              inp?.motivo ??
+                              "Analizar el comportamiento en contexto real."
+                            }
+                            marcadoresSugeridos={
+                              inp?.marcadores_sugeridos ?? ["contacto_visual"]
+                            }
                             onSubmit={(output) => {
                               addToolOutput({
-                                tool: "solicitar_video",
+                                tool: "analizar_video",
                                 toolCallId: part.toolCallId,
                                 output,
                               })
@@ -609,15 +622,35 @@ export function ChatPanel({
                         )
                       }
                       if (part.state === "output-available") {
+                        const o = part.output
+                        if (o.cancelado) {
+                          return (
+                            <div
+                              key={i}
+                              className="rounded-xl border border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+                            >
+                              Video no enviado.
+                            </div>
+                          )
+                        }
                         return (
-                          <div
+                          <VideoAnalysisCard
                             key={i}
-                            className="rounded-xl border border-border/60 bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
-                          >
-                            {part.output.cancelado
-                              ? "Video no enviado."
-                              : "Video recibido correctamente."}
-                          </div>
+                            videoUri={o.video_uri}
+                            duracionSeg={o.duracion_analizada_seg}
+                            resultados={[...o.resultados]}
+                            alertaClinica={o.alerta_clinica}
+                            calidadVideo={o.calidad_video}
+                            nota={o.nota}
+                          />
+                        )
+                      }
+                      if (part.state === "output-error") {
+                        return (
+                          <ToolError
+                            key={i}
+                            text={part.errorText ?? "Error de análisis de video"}
+                          />
                         )
                       }
                       return null
@@ -667,31 +700,6 @@ export function ChatPanel({
                             text={part.errorText ?? "Error al generar el informe."}
                           />
                         )
-                      }
-                      return null
-                    }
-
-                    // --- TOOL: analizar_video_conducta (server) ---
-                    if (part.type === "tool-analizar_video_conducta") {
-                      if (part.state === "input-available") {
-                        return <ToolPending key={i} label="Analizando marcadores conductuales…" />
-                      }
-                      if (part.state === "output-available") {
-                        const o = part.output
-                        return (
-                          <VideoAnalysisCard
-                            key={i}
-                            videoUri={o.video_uri}
-                            duracionSeg={o.duracion_analizada_seg}
-                            resultados={[...o.resultados]}
-                            alertaClinica={o.alerta_clinica}
-                            calidadVideo={o.calidad_video}
-                            nota={o.nota}
-                          />
-                        )
-                      }
-                      if (part.state === "output-error") {
-                        return <ToolError key={i} text={part.errorText ?? "Error de análisis"} />
                       }
                       return null
                     }

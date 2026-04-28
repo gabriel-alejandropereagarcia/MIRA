@@ -260,14 +260,26 @@ export const evaluarFollowupMchatTool = tool({
 })
 
 /* -----------------------------------------------------------
- * Tool 4 — solicitar_video (client-side render)
+ * Tool 4 — analizar_video (UNIFIED, client-side render + compute)
+ *
+ * This single tool replaces the previous two-step flow
+ * (`solicitar_video` → `analizar_video_conducta`). The UI is rendered
+ * client-side, the caregiver picks the markers and uploads the clip,
+ * the client streams the file to /api/upload-video and then calls
+ * /api/analyze-video, and finally returns the COMPLETE analysis as the
+ * tool output. The model only sees one tool, so it cannot get stuck
+ * "between" steps and just reply with text — the chaining is now
+ * deterministic and lives entirely in the client handler.
  * ----------------------------------------------------------- */
-export const solicitarVideoTool = tool({
-  description: "Abre el cargador de video. Ver criterios en base cacheada.",
+export const analizarVideoTool = tool({
+  description:
+    "Solicita al cuidador grabar un video corto del niño/a y devuelve el análisis automatizado de marcadores conductuales (Gemini Vision).",
   inputSchema: z.object({
     motivo: z
       .string()
-      .describe("Razón breve, explicable al cuidador, por la que pides el video."),
+      .describe(
+        "Razón breve, explicable al cuidador, por la que pides el video.",
+      ),
     marcadores_sugeridos: z
       .array(
         z.enum([
@@ -278,204 +290,37 @@ export const solicitarVideoTool = tool({
         ]),
       )
       .min(1)
-      .max(4),
+      .max(4)
+      .describe(
+        "Marcadores que MIRA propone analizar. El cuidador puede agregar o quitar antes de enviar.",
+      ),
   }),
   outputSchema: z.object({
-    video_uri: z.string(),
-    // The mime type returned by the Gemini File API after upload — required
-    // to reattach the file in `analizar_video_conducta`'s `fileData` block.
-    // Empty string when `cancelado: true`.
-    mime_type: z.string(),
-    marcadores: z.array(z.string()),
+    /**
+     * `cancelado: true` means the caregiver dismissed the uploader. All
+     * other fields will be empty/zero — MIRA must acknowledge the
+     * cancellation gracefully and propose a non-video next step.
+     */
     cancelado: z.boolean(),
-  }),
-})
-
-/* -----------------------------------------------------------
- * Tool 5 — analizar_video_conducta (server-side execute, REAL)
- * Llama a Gemini 2.5 Flash con `fileData` para inferir presencia
- * de marcadores conductuales. El URI proviene de la File API
- * y se obtuvo previamente vía /api/upload-video.
- * ----------------------------------------------------------- */
-
-const MARCADOR_DESCRIPCIONES: Record<string, string> = {
-  contacto_visual:
-    "contacto visual (¿el niño mira a los ojos de las personas con quienes interactúa?)",
-  respuesta_nombre:
-    "respuesta al nombre (¿el niño gira la cabeza, mira o reacciona cuando lo llaman por su nombre?)",
-  aleteo_manos:
-    "aleteo de manos o movimientos repetitivos (¿se observan movimientos estereotipados de manos, dedos o cuerpo?)",
-  senalamiento:
-    "señalamiento con dedo índice (¿el niño señala objetos o personas para pedir, mostrar o compartir interés?)",
-}
-
-const PRESENCIA = ["presente", "inconsistente", "ausente", "no_evaluable"] as const
-const CALIDAD = ["buena", "aceptable", "baja"] as const
-
-type Presencia = (typeof PRESENCIA)[number]
-type Calidad = (typeof CALIDAD)[number]
-
-/**
- * Coerce raw model output into a safe Presencia value. The model is
- * instructed to use one of four labels, but if it deviates we fall
- * back to "no_evaluable" so the rest of the pipeline stays valid.
- */
-function asPresencia(v: unknown): Presencia {
-  return (PRESENCIA as readonly string[]).includes(v as string)
-    ? (v as Presencia)
-    : "no_evaluable"
-}
-
-function asCalidad(v: unknown): Calidad {
-  return (CALIDAD as readonly string[]).includes(v as string)
-    ? (v as Calidad)
-    : "aceptable"
-}
-
-export const analizarVideoConductaTool = tool({
-  description:
-    "Analiza marcadores conductuales en un video usando Gemini Vision. Ver base cacheada.",
-  inputSchema: z.object({
-    video_uri: z
-      .string()
-      .describe(
-        "URI del archivo en la File API de Gemini (https://generativelanguage.googleapis.com/...).",
-      ),
-    mime_type: z
-      .string()
-      .nullable()
-      .describe("Mime type del video (e.g. video/mp4). Puede ser null."),
-    marcadores: z
-      .array(
-        z.enum([
-          "contacto_visual",
-          "respuesta_nombre",
-          "aleteo_manos",
-          "senalamiento",
+    video_uri: z.string(),
+    duracion_analizada_seg: z.number(),
+    calidad_video: z.enum(["buena", "aceptable", "baja"]),
+    alerta_clinica: z.boolean(),
+    resultados: z.array(
+      z.object({
+        marcador: z.string(),
+        presencia: z.enum([
+          "presente",
+          "inconsistente",
+          "ausente",
+          "no_evaluable",
         ]),
-      )
-      .min(1),
+        confianza: z.number(),
+        observacion: z.string(),
+      }),
+    ),
+    nota: z.string(),
   }),
-  execute: async ({ video_uri, mime_type, marcadores }) => {
-    const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    if (!apiKey) {
-      throw new Error(
-        "GOOGLE_API_KEY_REQUIRED: GOOGLE_GENERATIVE_AI_API_KEY no está configurada.",
-      )
-    }
-
-    const { GoogleGenerativeAI } = await import("@google/generative-ai")
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" })
-
-    const marcadoresTexto = marcadores
-      .map((m) => `- ${m}: ${MARCADOR_DESCRIPCIONES[m] ?? m}`)
-      .join("\n")
-
-    const prompt = `Eres un asistente de cribado del desarrollo infantil. Analiza este video de un niño/a y evalúa SOLO los siguientes marcadores conductuales observables:
-${marcadoresTexto}
-
-Para CADA marcador, responde EXACTAMENTE en este formato JSON:
-{
-  "resultados": [
-    {
-      "marcador": "nombre_del_marcador",
-      "presencia": "presente" | "inconsistente" | "ausente" | "no_evaluable",
-      "confianza": 0.0 a 1.0,
-      "observacion": "descripción breve de lo que observaste en el video (máx 1 frase)"
-    }
-  ],
-  "duracion_estimada_seg": número entero estimado de segundos analizados,
-  "calidad_video": "buena" | "aceptable" | "baja",
-  "nota_general": "observación general sobre el video (máx 1 frase)"
-}
-
-REGLAS CRÍTICAS:
-- Si la calidad del video NO permite evaluar un marcador, marca como "no_evaluable" con confianza 0.0.
-- NUNCA inventes observaciones que no puedas ver en el video.
-- Este análisis es ORIENTATIVO, no diagnóstico.
-- Sé conservador: es mejor marcar "no_evaluable" que dar un falso resultado.
-- Responde SOLO con el JSON, sin texto adicional, sin bloques de código markdown.`
-
-    let parsed: {
-      resultados?: Array<{
-        marcador?: string
-        presencia?: string
-        confianza?: number
-        observacion?: string
-      }>
-      duracion_estimada_seg?: number
-      calidad_video?: string
-      nota_general?: string
-    }
-
-    try {
-      const result = await model.generateContent([
-        {
-          fileData: {
-            mimeType: mime_type ?? "video/mp4",
-            fileUri: video_uri,
-          },
-        },
-        { text: prompt },
-      ])
-      const responseText = result.response.text()
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/)
-      if (!jsonMatch) {
-        throw new Error("Respuesta sin JSON válido.")
-      }
-      parsed = JSON.parse(jsonMatch[0])
-    } catch (err) {
-      console.log(
-        "[v0] analizar_video_conducta: Gemini call failed:",
-        (err as Error).message,
-      )
-      throw new Error(
-        "No se pudo analizar el video. " + (err as Error).message,
-      )
-    }
-
-    // Normalize and ensure every requested marker has a result, even
-    // if the model omitted it. Missing markers become "no_evaluable".
-    type RawResult = NonNullable<typeof parsed.resultados>[number]
-    const byName = new Map<string, RawResult>()
-    for (const r of parsed.resultados ?? []) {
-      if (r?.marcador) byName.set(r.marcador, r)
-    }
-    const resultados = marcadores.map((m) => {
-      const raw = byName.get(m)
-      const conf = Math.max(0, Math.min(1, Number(raw?.confianza ?? 0)))
-      return {
-        marcador: m,
-        presencia: asPresencia(raw?.presencia),
-        confianza: Math.round(conf * 100) / 100,
-        observacion:
-          typeof raw?.observacion === "string" && raw.observacion.length > 0
-            ? raw.observacion
-            : "Sin observación disponible para este marcador.",
-      }
-    })
-
-    const alertaClinica = resultados.some(
-      (r) => r.presencia === "ausente" && r.confianza >= 0.6,
-    )
-
-    const calidadVideo = asCalidad(parsed.calidad_video)
-    const duracion = Math.max(0, Math.round(Number(parsed.duracion_estimada_seg ?? 0)))
-    const notaGeneral =
-      typeof parsed.nota_general === "string" ? parsed.nota_general : ""
-
-    return {
-      video_uri,
-      duracion_analizada_seg: duracion,
-      resultados,
-      alerta_clinica: alertaClinica,
-      calidad_video: calidadVideo,
-      nota:
-        "Este análisis es orientativo y fue generado por IA. La evaluación clínica definitiva corresponde a un profesional de salud calificado." +
-        (notaGeneral ? " " + notaGeneral : ""),
-    }
-  },
 })
 
 /* -----------------------------------------------------------
@@ -507,7 +352,6 @@ export const miraTools = {
   iniciar_followup_mchat: iniciarFollowupMchatTool,
   evaluar_followup_mchat: evaluarFollowupMchatTool,
   sugerir_ejercicios_denver: sugerirEjerciciosDenverTool,
-  solicitar_video: solicitarVideoTool,
-  analizar_video_conducta: analizarVideoConductaTool,
+  analizar_video: analizarVideoTool,
   generar_informe_pediatra: generarInformeTool,
 } as const

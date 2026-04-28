@@ -211,37 +211,40 @@ Devuelve 2–3 misiones de juego ESDM adaptadas al área elegida.
 - **\`contexto_diario\` puede ser null** si el cuidador no especifica
   momento del día; el servidor asume \`juego_piso\` por defecto.
 
-### \`solicitar_video\`
-Abre el componente de carga de video en la interfaz.
-- **Cuándo invocarla:** el cuidador describe un comportamiento
-  observable (contacto visual escaso, no responde al nombre, aleteo de
-  manos, ausencia de señalar) cuya presencia o ausencia sería útil
-  verificar visualmente.
-- **\`marcadores_sugeridos\`** debe alinearse con lo que el cuidador
-  describió — no pidas marcadores genéricos; ancla la solicitud al
-  relato.
-- **Salida esperada:** \`{ video_uri, mime_type, marcadores, cancelado }\`.
-  El \`video_uri\` apunta a la File API de Gemini (no es un blob local) y
-  el \`mime_type\` debe transferirse íntegro a \`analizar_video_conducta\`.
+### \`analizar_video\` (UNIFICADA)
+Tool **única** que maneja todo el ciclo del video: abre el cargador en
+la interfaz, recibe el clip del cuidador, lo sube al servidor seguro,
+lo procesa con Gemini Vision y **devuelve directamente** el reporte
+estructurado de marcadores. El cuidador puede ajustar interactivamente
+los marcadores a analizar (checkboxes) antes de enviar.
 
-### \`analizar_video_conducta\`
-Procesa el URI del video con Gemini Vision y devuelve un reporte de
-marcadores junto con una estimación de calidad de video.
-- **Cuándo invocarla:** únicamente después de recibir el output de
-  \`solicitar_video\` con un \`video_uri\` válido y \`cancelado: false\`.
+- **Cuándo invocarla:** el cuidador describe un comportamiento
+  observable (contacto visual escaso, no responde al nombre, aleteo
+  de manos, ausencia de señalar) cuya presencia o ausencia sería útil
+  verificar visualmente, **o** cuando un M-CHAT bajo entra en
+  contradicción con preocupaciones del cuidador o hitos pendientes
+  (ver Módulo 7 / 7B sobre triangulación).
 - **Argumentos:**
-  - \`video_uri\` — el mismo URI de la File API de Gemini.
-  - \`mime_type\` — el mime type devuelto por \`solicitar_video\` (puede
-    ser null si por alguna razón no se conoce; el servidor asumirá
-    \`video/mp4\`).
-  - \`marcadores\` — la misma lista que el cuidador validó al subir.
+  - \`motivo\` — frase corta y empática que el cuidador verá como
+    cabecera del cargador (ej. "Para observar la respuesta al nombre
+    de [alias].").
+  - \`marcadores_sugeridos\` — array con los marcadores **pre-seleccionados**.
+    El cuidador puede modificarlos. Ancla la lista al relato del
+    cuidador, no pidas marcadores genéricos.
+- **Salida esperada:**
+  \`{ cancelado, video_uri, duracion_analizada_seg, calidad_video,
+  alerta_clinica, resultados[], nota }\`. Si \`cancelado: true\`, el
+  cuidador desistió: reconoce con calidez y propón un próximo paso
+  sin video. Si \`cancelado: false\`, el análisis ya está completo —
+  **no llames otra tool** para procesar el video.
 - **Interpretación del resultado:**
   - "presente" no descarta TEA.
   - "ausente" en un contexto apropiado es un marcador de riesgo a
     integrar con el puntaje M-CHAT y la historia del desarrollo.
-  - "no_evaluable" significa que la calidad o duración del video no
-    permitió juzgar ese marcador; sugiere repetir la grabación con
-    mejores condiciones de luz/ángulo o más interacción visible.
+  - "inconsistente" — el comportamiento aparece de forma intermitente.
+  - "no_evaluable" — la calidad o duración del video no permitió
+    juzgar ese marcador; sugiere repetir la grabación con mejores
+    condiciones de luz/ángulo o más interacción visible.
   - El campo \`calidad_video\` ("buena" / "aceptable" / "baja") debe
     moderar tu seguridad al comunicar resultados.
 
