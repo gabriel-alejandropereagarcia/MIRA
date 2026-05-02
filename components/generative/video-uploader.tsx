@@ -18,6 +18,7 @@ import {
   Upload,
   X,
 } from "lucide-react"
+import { upload } from "@vercel/blob/client"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -140,11 +141,18 @@ export function VideoUploader({
 
   /**
    * Runs the full pipeline:
-   *   1. POST file to /api/upload-video, wait for the Gemini File API
-   *      to mark it ACTIVE. Returns { fileUri, mimeType }.
-   *   2. POST { video_uri, mime_type, marcadores } to /api/analyze-video,
+   *   1. Upload directly from the browser to Vercel Blob using a
+   *      short-lived signed token (`/api/blob/upload-token`). This
+   *      bypasses Vercel's 4.5 MB request body cap on route handlers
+   *      — without this step, anything beyond ~3 s of footage fails
+   *      with a silent platform-edge 413 before reaching our handler.
+   *   2. POST `{ pathname, mimeType }` to /api/upload-video. The
+   *      server pulls the bytes from Blob (internal network, no body
+   *      limit), forwards them to Gemini File API, polls for ACTIVE,
+   *      deletes the temporary blob, returns { fileUri, mimeType }.
+   *   3. POST { video_uri, mime_type, marcadores } to /api/analyze-video,
    *      get back the structured analysis.
-   *   3. Resolve the AI tool call with the COMPLETE analysis. The model
+   *   4. Resolve the AI tool call with the COMPLETE analysis. The model
    *      then summarises results — no second tool call needed.
    */
   async function submit() {
@@ -153,12 +161,24 @@ export function VideoUploader({
     setPhase("uploading")
 
     try {
-      // Step 1 — Upload to Gemini File API (via server)
-      const uploadForm = new FormData()
-      uploadForm.append("video", file)
+      // Step 1 — Browser → Vercel Blob (direct, no 4.5 MB limit).
+      // The file name we pass is just a hint; `addRandomSuffix: true`
+      // on the server side ensures we never collide between caregivers.
+      const blob = await upload(file.name, file, {
+        access: "private",
+        handleUploadUrl: "/api/blob/upload-token",
+        contentType: file.type || "video/mp4",
+      })
+
+      // Step 2 — Server pulls from Blob → Gemini File API.
       const uploadRes = await fetch("/api/upload-video", {
         method: "POST",
-        body: uploadForm,
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          pathname: blob.pathname,
+          mimeType: file.type || "video/mp4",
+          displayName: file.name,
+        }),
       })
       if (!uploadRes.ok) {
         const body = (await uploadRes.json().catch(() => null)) as
@@ -166,20 +186,20 @@ export function VideoUploader({
           | null
         throw new Error(body?.error || "No se pudo subir el video.")
       }
-      const upload = (await uploadRes.json()) as {
+      const uploaded = (await uploadRes.json()) as {
         fileUri: string
         mimeType: string
       }
 
-      // Step 2 — Analyze with Gemini Vision (via server). Markers are
+      // Step 3 — Analyze with Gemini Vision (via server). Markers are
       // the clinical selection MIRA passed in — never user-modified.
       setPhase("analyzing")
       const analyzeRes = await fetch("/api/analyze-video", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          video_uri: upload.fileUri,
-          mime_type: upload.mimeType,
+          video_uri: uploaded.fileUri,
+          mime_type: uploaded.mimeType,
           marcadores: markersToAnalyze,
         }),
       })
@@ -197,11 +217,11 @@ export function VideoUploader({
         nota: string
       }
 
-      // Step 3 — Hand the model a complete result. No further tool calls.
+      // Step 4 — Hand the model a complete result. No further tool calls.
       setPhase("ready")
       onSubmit({
         cancelado: false,
-        video_uri: upload.fileUri,
+        video_uri: uploaded.fileUri,
         duracion_analizada_seg: analysis.duracion_analizada_seg,
         calidad_video: analysis.calidad_video,
         alerta_clinica: analysis.alerta_clinica,
