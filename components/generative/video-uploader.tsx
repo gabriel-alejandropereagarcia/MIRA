@@ -62,6 +62,7 @@ type Phase =
   | "error"
 
 const MAX_BYTES = 50 * 1024 * 1024
+const MAX_DURATION_SECONDS = 180 // Hard cap — videos beyond 3 minutes are rejected
 const RECOMMENDED_MIN_SECONDS = 30
 const RECOMMENDED_MAX_SECONDS = 60
 
@@ -115,6 +116,38 @@ export function VideoUploader({
    */
   const markersToAnalyze: Marcador[] = Array.from(new Set(marcadoresSugeridos))
 
+  /**
+   * Reads the duration of a video file using an ephemeral HTMLVideoElement.
+   * Returns the duration in seconds, or `null` if it can't be determined.
+   * This runs entirely in the browser before any upload happens — crucial
+   * to enforce cost-protection caps without burning network/Gemini credits.
+   */
+  function getVideoDuration(videoFile: File): Promise<number | null> {
+    return new Promise((resolve) => {
+      const video = document.createElement("video")
+      video.preload = "metadata"
+
+      const cleanup = () => {
+        URL.revokeObjectURL(video.src)
+        video.remove()
+      }
+
+      video.onloadedmetadata = () => {
+        const duration = video.duration
+        cleanup()
+        // `Infinity` can happen for live streams / broken files
+        resolve(Number.isFinite(duration) ? duration : null)
+      }
+
+      video.onerror = () => {
+        cleanup()
+        resolve(null)
+      }
+
+      video.src = URL.createObjectURL(videoFile)
+    })
+  }
+
   function handleFile(f: File | null) {
     if (!f) return
     if (!f.type.startsWith("video/")) {
@@ -161,6 +194,15 @@ export function VideoUploader({
     setPhase("uploading")
 
     try {
+      // Step 0 — Validate duration client-side before uploading anything.
+      // This protects against runaway Gemini costs from long videos.
+      const duration = await getVideoDuration(file)
+      if (duration !== null && duration > MAX_DURATION_SECONDS) {
+        throw new Error(
+          `El video dura ${Math.round(duration)} segundos, pero el máximo permitido es ${MAX_DURATION_SECONDS} segundos (3 minutos). Por favor, recorta el video e intenta de nuevo.`,
+        )
+      }
+
       // Step 1 — Browser → Vercel Blob (direct, no 4.5 MB limit).
       // The file name we pass is just a hint; `addRandomSuffix: true`
       // on the server side ensures we never collide between caregivers.

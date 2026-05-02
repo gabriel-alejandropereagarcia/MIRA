@@ -12,6 +12,48 @@ import { NextResponse } from "next/server"
  * tool after the first one resolves.
  */
 
+/* -------------------------------------------------------------------------
+ * Simple in-memory rate limiter: 1 analysis request per IP per 10 minutes.
+ * This is a cost-protection measure — Gemini Vision calls are expensive
+ * and we don't want a single user (or bot) burning through credits.
+ * The map lives at module scope so it persists across invocations within
+ * the same serverless instance (but resets on cold starts / deploys).
+ * ------------------------------------------------------------------------- */
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000 // 10 minutes
+const rateLimitMap = new Map<string, number>() // IP → timestamp of last request
+
+function getClientIp(req: Request): string {
+  const xff = req.headers.get("x-forwarded-for")
+  if (xff) {
+    // x-forwarded-for can be "client, proxy1, proxy2" — take the first one
+    return xff.split(",")[0].trim()
+  }
+  return "unknown"
+}
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const lastRequest = rateLimitMap.get(ip)
+  if (lastRequest && now - lastRequest < RATE_LIMIT_WINDOW_MS) {
+    return true
+  }
+  // Allowed — record this timestamp
+  rateLimitMap.set(ip, now)
+  return false
+}
+
+// Periodically clean stale entries to avoid memory leaks in long-running
+// instances. We piggyback on each request rather than a setInterval so
+// we don't keep the process alive unnecessarily.
+function pruneStaleEntries(): void {
+  const now = Date.now()
+  for (const [ip, ts] of rateLimitMap) {
+    if (now - ts > RATE_LIMIT_WINDOW_MS) {
+      rateLimitMap.delete(ip)
+    }
+  }
+}
+
 const MARCADOR_DESCRIPCIONES: Record<string, string> = {
   contacto_visual:
     "contacto visual (¿el niño mira a los ojos de las personas con quienes interactúa?)",
@@ -52,6 +94,19 @@ export const runtime = "nodejs"
 export const maxDuration = 120
 
 export async function POST(req: Request) {
+  // Rate-limit check — 1 request per IP per 10 minutes
+  pruneStaleEntries()
+  const clientIp = getClientIp(req)
+  if (isRateLimited(clientIp)) {
+    return NextResponse.json(
+      {
+        error:
+          "Has alcanzado el límite de análisis de video. Por favor, espera 10 minutos antes de intentar de nuevo.",
+      },
+      { status: 429 },
+    )
+  }
+
   const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY
   if (!apiKey) {
     return NextResponse.json(
