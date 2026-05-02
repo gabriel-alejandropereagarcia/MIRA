@@ -21,6 +21,7 @@ export interface ChildProfile {
   sex: Sex
   guardian: string
   concerns: string[]
+  locale: "es" | "en" // Added for bilingue support
   createdAt: string // ISO timestamp
 }
 

@@ -60,8 +60,16 @@ export default function Page() {
 
   if (!child) {
     return (
-      <main className="flex min-h-dvh w-full items-start justify-center bg-background">
+      <main className="flex min-h-dvh w-full flex-col items-start justify-center bg-background">
         <IntakeForm onComplete={handleIntakeComplete} />
+        <div className="absolute bottom-8 left-8 text-xs">
+          <a
+            href="/como-funciona"
+            className="text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
+          >
+            Cómo funciona MIRA →
+          </a>
+        </div>
       </main>
     )
   }
