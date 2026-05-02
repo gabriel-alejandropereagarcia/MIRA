@@ -68,10 +68,19 @@ const GUARDIANS_EN = [
 
 type Props = {
   onComplete: (profile: ChildProfile) => void
+  // Optional callback so the parent can mirror the chosen language in
+  // surrounding chrome (e.g. the "How it works" link, page metadata, etc).
+  onLocaleChange?: (locale: Locale) => void
 }
 
-export function IntakeForm({ onComplete }: Props) {
-  const [locale, setLocale] = useState<Locale>("es")
+export function IntakeForm({ onComplete, onLocaleChange }: Props) {
+  const [locale, setLocaleState] = useState<Locale>("es")
+
+  // Keep parent in sync any time the user toggles the language pill.
+  const setLocale = (next: Locale) => {
+    setLocaleState(next)
+    onLocaleChange?.(next)
+  }
   const [alias, setAlias] = useState("")
   const [birthDate, setBirthDate] = useState("")
   const [sex, setSex] = useState<Sex | "">("")

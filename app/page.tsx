@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { AnimatePresence, motion } from "framer-motion"
-import { X } from "lucide-react"
+import { ArrowUpRight, X } from "lucide-react"
 import { ChatPanel } from "@/components/mira/chat-panel"
 import { IntakeForm } from "@/components/mira/intake-form"
 import { TriageSidebar, type TriageState } from "@/components/mira/triage-sidebar"
 import { Button } from "@/components/ui/button"
 import { getProfile, type ChildProfile } from "@/lib/mira-storage"
+
+type Locale = "es" | "en"
 
 const ACTIVE_CHILD_KEY = "mira_active_child"
 
@@ -24,6 +26,10 @@ export default function Page() {
   const [hydrated, setHydrated] = useState(false)
   const [triage, setTriage] = useState<TriageState>(INITIAL_STATE)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  // Mirror of the IntakeForm language toggle so the "How it works"
+  // chip in the corner stays in sync with whichever locale the
+  // caregiver picked (defaults to Spanish to match IntakeForm).
+  const [intakeLocale, setIntakeLocale] = useState<Locale>("es")
 
   // Rehydrate the active profile on mount so a refresh keeps the user in
   // the chat instead of bouncing back to the intake form.
@@ -59,17 +65,30 @@ export default function Page() {
   }
 
   if (!child) {
+    const linkLabel =
+      intakeLocale === "en" ? "How MIRA works" : "Cómo funciona MIRA"
+    const linkHref =
+      intakeLocale === "en" ? "/como-funciona?lang=en" : "/como-funciona"
+
     return (
-      <main className="flex min-h-dvh w-full flex-col items-start justify-center bg-background">
-        <IntakeForm onComplete={handleIntakeComplete} />
-        <div className="absolute bottom-8 left-8 text-xs">
-          <a
-            href="/como-funciona"
-            className="text-muted-foreground hover:text-foreground transition-colors underline-offset-2 hover:underline"
-          >
-            Cómo funciona MIRA →
-          </a>
-        </div>
+      <main className="relative flex min-h-dvh w-full items-center justify-center bg-background">
+        {/* Discreet floating chip in the top-right. Stays out of the
+            form's reading flow but is always reachable from any
+            scroll position thanks to `fixed`. The pill style + soft
+            border + tracking-wide label match the visual language of
+            the rest of MIRA's chrome. */}
+        <a
+          href={linkHref}
+          className="group fixed right-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/80 px-3 py-1.5 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur-md transition-all hover:border-primary/40 hover:text-foreground md:right-6 md:top-6"
+          aria-label={linkLabel}
+        >
+          <span>{linkLabel}</span>
+          <ArrowUpRight className="size-3 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
+        </a>
+        <IntakeForm
+          onComplete={handleIntakeComplete}
+          onLocaleChange={setIntakeLocale}
+        />
       </main>
     )
   }
