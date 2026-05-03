@@ -109,6 +109,8 @@ BAJO = 90 días (Seguimiento rutinario)`,
       "ONGs — alcance en comunidades",
     ],
     ctaCollab: "Quiero colaborar",
+    juryLink: "Para el jurado",
+    juryHref: "/jurado",
     footerLine: (
       <>
         Built with <strong>Next.js 16</strong>, <strong>Vercel AI SDK</strong>,{" "}
@@ -199,6 +201,8 @@ LOW        = 90 days (routine follow-up)`,
       "NGOs — community reach",
     ],
     ctaCollab: "I want to collaborate",
+    juryLink: "For the jury",
+    juryHref: "/jury",
     footerLine: (
       <>
         Built with <strong>Next.js 16</strong>, <strong>Vercel AI SDK</strong>,{" "}
@@ -507,9 +511,14 @@ export default function ComoFuncionaPage() {
       {/* Footer */}
       <footer className="border-t border-border/60 bg-card/30 px-4 py-8 text-center text-xs text-muted-foreground">
         <div className="mx-auto max-w-4xl space-y-3">
-          <Button asChild variant="link" size="sm">
-            <a href={homeHref}>← {t.backToApp}</a>
-          </Button>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button asChild variant="link" size="sm">
+              <a href={homeHref}>← {t.backToApp}</a>
+            </Button>
+            <Button asChild variant="ghost" size="sm">
+              <a href={t.juryHref}>{t.juryLink} →</a>
+            </Button>
+          </div>
           <p>{t.footerLine}</p>
         </div>
       </footer>
